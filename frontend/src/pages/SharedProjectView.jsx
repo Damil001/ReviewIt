@@ -19,9 +19,9 @@ import {
   Globe,
   MessageCircle,
 } from 'lucide-react';
+import { API_BASE_URL, SERVER_BASE_URL } from '../config.js';
 
-const API_BASE_URL = 'http://localhost:3001/api';
-const PROXY_BASE_URL = 'http://localhost:3001';
+const PROXY_BASE_URL = SERVER_BASE_URL;
 
 export default function SharedProjectView() {
   const { token } = useParams();

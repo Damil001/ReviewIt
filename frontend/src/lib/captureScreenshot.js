@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:3001/api';
+import { API_BASE_URL, getFullFileUrl } from '../config.js';
 
 /**
  * Captures a screenshot using server-side Puppeteer
@@ -75,8 +75,8 @@ export async function captureScreenshot(iframe, x, y, areaSize = { width: 500, h
     const result = await response.json();
     console.log('Server-side screenshot captured:', result.url);
     
-    // Return full URL
-    return `http://localhost:3001${result.url}`;
+    // Return full URL using helper
+    return getFullFileUrl(result.url);
   } catch (error) {
     console.error('Error capturing screenshot:', error);
     // Create placeholder on failure
@@ -167,7 +167,8 @@ async function createPlaceholderScreenshot(url, iframe) {
     const result = await response.json();
     console.log('Placeholder screenshot created:', result.url);
     
-    return `http://localhost:3001${result.url}`;
+    // Return full URL using helper
+    return getFullFileUrl(result.url);
   } catch (error) {
     console.error('Placeholder creation failed:', error);
     return null;

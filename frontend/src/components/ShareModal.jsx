@@ -25,8 +25,7 @@ import {
   Trash2,
   RefreshCw,
 } from 'lucide-react';
-
-const API_BASE_URL = 'http://localhost:3001/api';
+import { API_BASE_URL } from '../config.js';
 
 export default function ShareModal({ projectId, isOpen, onClose }) {
   const [loading, setLoading] = useState(true);

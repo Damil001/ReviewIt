@@ -4,13 +4,14 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer';
+import { uploadToCloud, isCloudStorageEnabled, generateFilename } from '../lib/cloudStorage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
-// Ensure uploads directory exists
+// Ensure uploads directory exists (for local fallback)
 const uploadsDir = path.join(__dirname, '..', 'uploads', 'screenshots');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -29,19 +30,9 @@ async function getBrowser() {
   return browserInstance;
 }
 
-// Configure multer for screenshot storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'screenshot-' + uniqueSuffix + '.png');
-  }
-});
-
+// Always use memory storage - we decide at request time whether to save to cloud or local
 const upload = multer({
-  storage: storage,
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit
   },
@@ -55,22 +46,68 @@ const upload = multer({
   }
 });
 
+// Log storage mode (delayed to allow dotenv to load)
+setTimeout(() => {
+  if (isCloudStorageEnabled()) {
+    console.log('☁️  Cloud storage enabled - uploads will go to S3/R2');
+  } else {
+    console.log('📁 Cloud storage not configured - using local storage');
+    console.log('   Set S3_BUCKET_NAME, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY to enable cloud storage');
+  }
+}, 100);
+
+/**
+ * Helper function to save a buffer either to cloud or local storage
+ * @param {Buffer} buffer - The image buffer
+ * @param {string} filename - The filename
+ * @param {string} contentType - MIME type
+ * @returns {Promise<{url: string, filename: string}>}
+ */
+async function saveScreenshot(buffer, filename, contentType = 'image/png') {
+  if (isCloudStorageEnabled()) {
+    // Upload to cloud storage
+    const result = await uploadToCloud(buffer, filename, contentType);
+    return {
+      url: result.url,
+      filename: filename,
+      storage: 'cloud',
+    };
+  } else {
+    // Save locally
+    const filepath = path.join(uploadsDir, filename);
+    fs.writeFileSync(filepath, buffer);
+    const localUrl = `/uploads/screenshots/${filename}`;
+    console.log('📁 Screenshot saved locally:', localUrl);
+    return {
+      url: localUrl,
+      filename: filename,
+      storage: 'local',
+    };
+  }
+}
+
 // Upload screenshot endpoint
-router.post('/screenshot', upload.single('screenshot'), (req, res) => {
+router.post('/screenshot', upload.single('screenshot'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Return the URL to access the uploaded file
-    const screenshotUrl = `/uploads/screenshots/${req.file.filename}`;
+    let screenshotUrl;
+    let filename;
+
+    // Determine file extension from mimetype
+    const extension = req.file.mimetype.split('/')[1] || 'png';
+    filename = generateFilename(extension);
     
-    console.log('Screenshot uploaded:', screenshotUrl);
+    // Use the helper function which handles both cloud and local storage
+    const result = await saveScreenshot(req.file.buffer, filename, req.file.mimetype);
+    screenshotUrl = result.url;
     
     res.json({
       success: true,
       url: screenshotUrl,
-      filename: req.file.filename,
+      filename: filename,
     });
   } catch (error) {
     console.error('Error uploading screenshot:', error);
@@ -81,7 +118,7 @@ router.post('/screenshot', upload.single('screenshot'), (req, res) => {
 // Handle base64 screenshot upload (alternative method)
 router.post('/screenshot-base64', express.json({ limit: '10mb' }), async (req, res) => {
   try {
-    const { imageData, filename } = req.body;
+    const { imageData, filename: providedFilename } = req.body;
     
     if (!imageData) {
       return res.status(400).json({ error: 'No image data provided' });
@@ -89,22 +126,23 @@ router.post('/screenshot-base64', express.json({ limit: '10mb' }), async (req, r
 
     // Remove data URL prefix if present
     const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    // Determine content type from data URL
+    const contentTypeMatch = imageData.match(/^data:(image\/\w+);base64,/);
+    const contentType = contentTypeMatch ? contentTypeMatch[1] : 'image/png';
+    const extension = contentType.split('/')[1] || 'png';
     
     // Generate unique filename
-    const uniqueFilename = filename || `screenshot-${Date.now()}-${Math.round(Math.random() * 1E9)}.png`;
-    const filepath = path.join(uploadsDir, uniqueFilename);
+    const filename = providedFilename || generateFilename(extension);
     
-    // Write the file
-    fs.writeFileSync(filepath, base64Data, 'base64');
-    
-    const screenshotUrl = `/uploads/screenshots/${uniqueFilename}`;
-    
-    console.log('Screenshot (base64) uploaded:', screenshotUrl);
+    const result = await saveScreenshot(buffer, filename, contentType);
     
     res.json({
       success: true,
-      url: screenshotUrl,
-      filename: uniqueFilename,
+      url: result.url,
+      filename: result.filename,
+      storage: result.storage,
     });
   } catch (error) {
     console.error('Error uploading screenshot:', error);
@@ -191,27 +229,25 @@ router.post('/capture-screenshot', express.json(), async (req, res) => {
       await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 200)));
     }
 
-    // Take screenshot
+    // Take screenshot as buffer
     const screenshotBuffer = await page.screenshot({
       type: 'jpeg',
       quality: 85,
     });
 
     // Generate unique filename
-    const uniqueFilename = `screenshot-${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
-    const filepath = path.join(uploadsDir, uniqueFilename);
+    const filename = generateFilename('jpg');
     
-    // Write the file
-    fs.writeFileSync(filepath, screenshotBuffer);
+    // Save to cloud or local storage
+    const result = await saveScreenshot(screenshotBuffer, filename, 'image/jpeg');
     
-    const screenshotUrl = `/uploads/screenshots/${uniqueFilename}`;
-    
-    console.log('Screenshot captured at position:', { x, y }, '→', screenshotUrl);
+    console.log(`Screenshot captured at position: { x: ${x}, y: ${y} } → ${result.url}`);
     
     res.json({
       success: true,
-      url: screenshotUrl,
-      filename: uniqueFilename,
+      url: result.url,
+      filename: result.filename,
+      storage: result.storage,
     });
   } catch (error) {
     console.error('Error capturing screenshot:', error);
@@ -232,4 +268,3 @@ process.on('SIGINT', async () => {
 });
 
 export default router;
-

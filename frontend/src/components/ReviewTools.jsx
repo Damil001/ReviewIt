@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-
-const API_BASE_URL = 'http://localhost:3001/api';
+import { API_BASE_URL } from '../config.js';
 
 export default function ReviewTools({ projectId, breakpointIndex, onReviewAdd, onToolChange }) {
   const [tool, setTool] = useState('point'); // point, area, drawing

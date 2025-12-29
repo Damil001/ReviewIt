@@ -41,18 +41,10 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import { formatMetadataForDisplay } from '@/lib/captureMetadata';
+import { API_BASE_URL, getFullFileUrl } from '../config.js';
 
-const API_BASE_URL = 'http://localhost:3001/api';
-const SERVER_BASE_URL = 'http://localhost:3001';
-
-// Helper to get full image URL
-const getFullImageUrl = (url) => {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
-    return url;
-  }
-  return `${SERVER_BASE_URL}${url}`;
-};
+// Alias for backwards compatibility
+const getFullImageUrl = getFullFileUrl;
 
 // Icon map for metadata
 const iconMap = {

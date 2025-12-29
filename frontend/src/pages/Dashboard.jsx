@@ -27,8 +27,7 @@ import {
   Calendar,
   LayoutGrid,
 } from 'lucide-react';
-
-const API_BASE_URL = 'http://localhost:3001/api';
+import { API_BASE_URL } from '../config.js';
 
 export default function Dashboard() {
   const { user, logout } = useAuth();

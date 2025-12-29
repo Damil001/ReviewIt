@@ -6,9 +6,7 @@ import CommentThread from './CommentThread';
 import DrawingCanvas from './DrawingCanvas';
 import { captureMetadata } from '@/lib/captureMetadata';
 import { captureScreenshot } from '@/lib/captureScreenshot';
-
-const API_BASE_URL = 'http://localhost:3001/api';
-const SOCKET_URL = 'http://localhost:3001';
+import { API_BASE_URL, SOCKET_URL } from '../config.js';
 
 export default function ReviewOverlay({ 
   targetUrl, 

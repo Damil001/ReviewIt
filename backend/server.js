@@ -23,14 +23,22 @@ dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+
+const PORT = process.env.PORT || 3001;
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:${PORT}`;
+
+// CORS configuration - allow frontend origin
+const corsOrigins = process.env.CORS_ORIGINS 
+  ? process.env.CORS_ORIGINS.split(',') 
+  : [FRONTEND_URL, 'http://localhost:5173', 'http://localhost:3000'];
+
 const io = new Server(httpServer, {
   cors: {
-    origin: '*',
+    origin: corsOrigins,
     methods: ['GET', 'POST'],
   },
 });
-
-const PORT = process.env.PORT || 3001;
 
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/reviewonly';
@@ -361,11 +369,11 @@ app.get('/proxy', async (req, res) => {
     
     // Inject overlay script
     $('body').append(`
-      <script src="http://localhost:${PORT}/overlay-script.js"></script>
+      <script src="${BACKEND_URL}/overlay-script.js"></script>
       <script>
         window.__REVIEW_MODE__ = true;
         window.__TARGET_URL__ = "${targetUrl}";
-        window.__SOCKET_URL__ = "http://localhost:${PORT}";
+        window.__SOCKET_URL__ = "${BACKEND_URL}";
       </script>
     `);
     

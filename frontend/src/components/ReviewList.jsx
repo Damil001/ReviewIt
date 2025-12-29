@@ -13,8 +13,7 @@ import {
   Pencil,
   MousePointer,
 } from 'lucide-react';
-
-const API_BASE_URL = 'http://localhost:3001/api';
+import { API_BASE_URL } from '../config.js';
 
 export default function ReviewList({ reviews, projectId, onUpdate }) {
   const [selectedReview, setSelectedReview] = useState(null);
