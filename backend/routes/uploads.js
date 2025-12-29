@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import puppeteer from 'puppeteer';
 import { uploadToCloud, isCloudStorageEnabled, generateFilename } from '../lib/cloudStorage.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,43 +17,31 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Browser instance for reuse - Puppeteer is optional
+// Browser instance for reuse
 let browserInstance = null;
-let puppeteerAvailable = true;
-let puppeteer = null;
-
-// Try to load puppeteer (optional dependency for production)
-try {
-  puppeteer = (await import('puppeteer')).default;
-  console.log('✅ Puppeteer loaded successfully');
-} catch (e) {
-  console.log('⚠️  Puppeteer not available - server-side screenshots disabled');
-  puppeteerAvailable = false;
-}
 
 async function getBrowser() {
-  if (!puppeteerAvailable || !puppeteer) {
-    return null;
-  }
-  
   if (!browserInstance) {
-    try {
-      browserInstance = await puppeteer.launch({
-        headless: 'new',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--single-process',
-        ],
-      });
-      console.log('✅ Browser launched successfully');
-    } catch (error) {
-      console.log('⚠️  Failed to launch browser:', error.message);
-      puppeteerAvailable = false;
-      return null;
+    const launchOptions = {
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+      ],
+    };
+    
+    // Use custom executable path if set (for Render)
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
     }
+    
+    browserInstance = await puppeteer.launch(launchOptions);
+    console.log('✅ Browser launched successfully');
   }
   return browserInstance;
 }
@@ -112,6 +101,7 @@ async function saveScreenshot(buffer, filename, contentType = 'image/png') {
     };
   }
 }
+
 
 // Upload screenshot endpoint
 router.post('/screenshot', upload.single('screenshot'), async (req, res) => {
@@ -177,7 +167,7 @@ router.post('/screenshot-base64', express.json({ limit: '10mb' }), async (req, r
   }
 });
 
-// Server-side screenshot capture using Puppeteer (optimized for speed)
+// Server-side screenshot capture using Puppeteer
 router.post('/capture-screenshot', express.json(), async (req, res) => {
   let page = null;
   
@@ -192,17 +182,6 @@ router.post('/capture-screenshot', express.json(), async (req, res) => {
     console.log('Comment position (%):', { x, y });
 
     const browser = await getBrowser();
-    
-    // If Puppeteer isn't available, return a message (frontend will use placeholder)
-    if (!browser) {
-      console.log('⚠️  Browser not available, skipping server-side screenshot');
-      return res.status(503).json({ 
-        error: 'Screenshot service unavailable',
-        message: 'Server-side screenshots are disabled in production. Comments will still work!',
-        fallback: true
-      });
-    }
-    
     page = await browser.newPage();
     
     // Set viewport size
