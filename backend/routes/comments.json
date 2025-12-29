@@ -1,0 +1,38 @@
+[
+  {
+    "id": "b52f23ef-34e9-49ce-96d3-ceb36a12e5d2",
+    "url": "https://sidelyer-staging.webflow.io/",
+    "x": 65.36458333333334,
+    "y": 22.8515625,
+    "breakpoint": "tablet",
+    "text": "this is test",
+    "author": "Damil",
+    "timestamp": 1766862563829,
+    "resolved": false,
+    "replies": []
+  },
+  {
+    "id": "b88d25f9-ca2f-4680-add2-479849e08a4f",
+    "url": "https://sidelyer-staging.webflow.io/",
+    "x": 50.1953125,
+    "y": 79.94791666666666,
+    "breakpoint": "laptop",
+    "text": "this is another test",
+    "author": "Damil",
+    "timestamp": 1766862587605,
+    "resolved": false,
+    "replies": []
+  },
+  {
+    "id": "aa4bc407-7263-42cb-aff0-1df30af0eb8f",
+    "url": "https://sidelyer-staging.webflow.io/",
+    "x": 23.09217046580773,
+    "y": 42.421934501142424,
+    "breakpoint": "laptop",
+    "text": "this is another test",
+    "author": "Damil",
+    "timestamp": 1766862827793,
+    "resolved": false,
+    "replies": []
+  }
+]
