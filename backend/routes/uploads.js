@@ -42,9 +42,33 @@ async function getBrowser() {
       ],
     };
     
+    // Try to find Chrome in cache directory dynamically
+    const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+    let foundChromePath = null;
+    
+    if (fs.existsSync(cacheDir)) {
+      try {
+        const chromeDir = path.join(cacheDir, 'chrome');
+        if (fs.existsSync(chromeDir)) {
+          const versions = fs.readdirSync(chromeDir);
+          for (const version of versions) {
+            const chromePath = path.join(chromeDir, version, 'chrome-linux64', 'chrome');
+            if (fs.existsSync(chromePath)) {
+              foundChromePath = chromePath;
+              console.log(`🔍 Found Chrome at: ${chromePath}`);
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        console.log('⚠️  Error searching cache dir:', e.message);
+      }
+    }
+    
     // Try multiple possible Chrome paths
     const possiblePaths = [
       process.env.PUPPETEER_EXECUTABLE_PATH,
+      foundChromePath,
       '/opt/render/.cache/puppeteer/chrome/linux-143.0.7499.169/chrome-linux64/chrome',
       '/opt/render/.cache/puppeteer/chrome/linux-131.0.6778.204/chrome-linux64/chrome',
       '/usr/bin/chromium-browser',
@@ -231,14 +255,16 @@ router.post('/capture-screenshot', express.json({ limit: '10mb' }), async (req, 
         console.log('📸 Using ScreenshotOne API for:', url);
         const axios = (await import('axios')).default;
         
-        const apiUrl = `https://api.screenshotone.com/take?access_key=${apiKey}&url=${encodeURIComponent(url)}&viewport_width=${width}&viewport_height=${height}&format=jpg&quality=75&block_ads=true&timeout=30`;
+        // ScreenshotOne API parameters
+        const apiUrl = `https://api.screenshotone.com/take?access_key=${apiKey}&url=${encodeURIComponent(url)}&viewport_width=${width}&viewport_height=${height}&format=jpg&quality=75&block_ads=true&block_cookie_banners=true&timeout=30&delay=1`;
         
         const response = await axios.get(apiUrl, { 
           responseType: 'arraybuffer',
-          timeout: 35000 
+          timeout: 35000,
+          validateStatus: (status) => status < 500, // Don't throw on 4xx
         });
         
-        if (response.status === 200 && response.data) {
+        if (response.status === 200 && response.data && response.data.length > 0) {
           const filename = generateFilename('jpg');
           const result = await saveScreenshot(Buffer.from(response.data), filename, 'image/jpeg');
           console.log('✅ Screenshot via API:', result.url);
@@ -248,10 +274,20 @@ router.post('/capture-screenshot', express.json({ limit: '10mb' }), async (req, 
             filename: result.filename,
             storage: result.storage,
           });
+        } else {
+          // Try to get error message from response
+          const errorText = response.data ? Buffer.from(response.data).toString('utf-8') : 'Unknown error';
+          console.log('⚠️  API returned status', response.status, ':', errorText.substring(0, 200));
         }
       } catch (apiError) {
-        console.log('⚠️  API screenshot failed:', apiError.message);
+        const errorMsg = apiError.response?.data 
+          ? Buffer.from(apiError.response.data).toString('utf-8').substring(0, 200)
+          : apiError.message;
+        console.log('⚠️  API screenshot failed:', errorMsg);
+        console.log('💡 Check your SCREENSHOT_API_KEY is valid at screenshotone.com');
       }
+    } else {
+      console.log('💡 Set SCREENSHOT_API_KEY env var for production screenshots');
     }
 
     // Option 2: Try Puppeteer (works locally, may not work in prod)
