@@ -42,45 +42,52 @@ async function getBrowser() {
       ],
     };
     
-    // Try to find Chrome in cache directory dynamically
-    const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+    // Try to find Chrome in multiple locations (cache dir doesn't persist on Render)
+    const searchDirs = [
+      process.env.PUPPETEER_CACHE_DIR,
+      '/opt/render/.cache/puppeteer',
+      path.join(__dirname, '..', '.local-chrome'), // Project directory (persists!)
+      '/opt/render/project/src/backend/.local-chrome',
+    ].filter(Boolean);
+    
     let foundChromePath = null;
     
-    if (fs.existsSync(cacheDir)) {
-      try {
-        const chromeDir = path.join(cacheDir, 'chrome');
-        if (fs.existsSync(chromeDir)) {
-          const versions = fs.readdirSync(chromeDir);
-          console.log(`🔍 Found Chrome versions: ${versions.join(', ')}`);
-          for (const version of versions) {
-            // Try different possible structures
-            const possibleStructures = [
-              path.join(chromeDir, version, 'chrome-linux64', 'chrome'),
-              path.join(chromeDir, version, 'chrome', 'chrome'),
-              path.join(chromeDir, version, 'chrome'),
-            ];
-            
-            for (const chromePath of possibleStructures) {
-              if (fs.existsSync(chromePath)) {
-                // Check if executable
-                try {
-                  fs.accessSync(chromePath, fs.constants.F_OK | fs.constants.X_OK);
-                  foundChromePath = chromePath;
-                  console.log(`✅ Found executable Chrome at: ${chromePath}`);
-                  break;
-                } catch (e) {
-                  console.log(`⚠️  Chrome found but not executable: ${chromePath}`);
+    for (const cacheDir of searchDirs) {
+      if (fs.existsSync(cacheDir)) {
+        try {
+          const chromeDir = path.join(cacheDir, 'chrome');
+          if (fs.existsSync(chromeDir)) {
+            const versions = fs.readdirSync(chromeDir);
+            console.log(`🔍 Found Chrome versions in ${cacheDir}: ${versions.join(', ')}`);
+            for (const version of versions) {
+              // Try different possible structures
+              const possibleStructures = [
+                path.join(chromeDir, version, 'chrome-linux64', 'chrome'),
+                path.join(chromeDir, version, 'chrome', 'chrome'),
+                path.join(chromeDir, version, 'chrome'),
+              ];
+              
+              for (const chromePath of possibleStructures) {
+                if (fs.existsSync(chromePath)) {
+                  // Check if executable
+                  try {
+                    fs.accessSync(chromePath, fs.constants.F_OK | fs.constants.X_OK);
+                    foundChromePath = chromePath;
+                    console.log(`✅ Found executable Chrome at: ${chromePath}`);
+                    break;
+                  } catch (e) {
+                    console.log(`⚠️  Chrome found but not executable: ${chromePath}`);
+                  }
                 }
               }
+              if (foundChromePath) break;
             }
             if (foundChromePath) break;
           }
+        } catch (e) {
+          console.log(`⚠️  Error searching ${cacheDir}:`, e.message);
         }
-      } catch (e) {
-        console.log('⚠️  Error searching cache dir:', e.message);
       }
-    } else {
-      console.log(`⚠️  Cache directory doesn't exist: ${cacheDir}`);
     }
     
     // Try multiple possible Chrome paths
@@ -133,39 +140,48 @@ async function getBrowser() {
 
 // Check Chrome availability at startup (diagnostic)
 async function checkChromeAvailability() {
-  const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
-  console.log('\n🔍 Checking Chrome availability...');
-  console.log(`   Cache directory: ${cacheDir}`);
-  console.log(`   Exists: ${fs.existsSync(cacheDir)}`);
+  // Check multiple possible locations
+  const possibleDirs = [
+    process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer',
+    path.join(__dirname, '..', '.local-chrome'), // Project directory (persists)
+    '/opt/render/project/src/backend/.local-chrome', // Alternative project path
+  ];
   
-  if (fs.existsSync(cacheDir)) {
-    try {
-      const chromeDir = path.join(cacheDir, 'chrome');
-      if (fs.existsSync(chromeDir)) {
-        const versions = fs.readdirSync(chromeDir);
-        console.log(`   Found Chrome versions: ${versions.join(', ')}`);
-        for (const version of versions) {
-          const chromePath = path.join(chromeDir, version, 'chrome-linux64', 'chrome');
-          if (fs.existsSync(chromePath)) {
-            try {
-              fs.accessSync(chromePath, fs.constants.F_OK | fs.constants.X_OK);
-              console.log(`   ✅ Executable Chrome found: ${chromePath}`);
-            } catch (e) {
-              console.log(`   ⚠️  Chrome found but not executable: ${chromePath}`);
+  console.log('\n🔍 Checking Chrome availability...');
+  
+  for (const cacheDir of possibleDirs) {
+    console.log(`   Checking: ${cacheDir}`);
+    console.log(`   Exists: ${fs.existsSync(cacheDir)}`);
+    
+    if (fs.existsSync(cacheDir)) {
+      try {
+        const chromeDir = path.join(cacheDir, 'chrome');
+        if (fs.existsSync(chromeDir)) {
+          const versions = fs.readdirSync(chromeDir);
+          console.log(`   ✅ Found Chrome versions: ${versions.join(', ')}`);
+          for (const version of versions) {
+            const chromePath = path.join(chromeDir, version, 'chrome-linux64', 'chrome');
+            if (fs.existsSync(chromePath)) {
+              try {
+                fs.accessSync(chromePath, fs.constants.F_OK | fs.constants.X_OK);
+                console.log(`   ✅ Executable Chrome found: ${chromePath}`);
+                return chromePath; // Return first found executable
+              } catch (e) {
+                console.log(`   ⚠️  Chrome found but not executable: ${chromePath}`);
+              }
             }
           }
         }
-      } else {
-        console.log(`   ⚠️  Chrome directory doesn't exist: ${chromeDir}`);
+      } catch (e) {
+        console.log(`   ⚠️  Error checking: ${e.message}`);
       }
-    } catch (e) {
-      console.log(`   ⚠️  Error checking: ${e.message}`);
     }
-  } else {
-    console.log(`   ⚠️  Cache directory doesn't exist - Chrome may not be installed`);
-    console.log(`   💡 Make sure build command includes: npx puppeteer browsers install chrome`);
   }
+  
+  console.log(`   ⚠️  Chrome not found in any location`);
+  console.log(`   💡 Will try Puppeteer's bundled Chromium`);
   console.log('');
+  return null;
 }
 
 // Run check on module load
