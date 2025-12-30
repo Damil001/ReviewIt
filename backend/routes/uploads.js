@@ -45,11 +45,20 @@ async function getBrowser() {
     // Try multiple possible Chrome paths
     const possiblePaths = [
       process.env.PUPPETEER_EXECUTABLE_PATH,
+      '/opt/render/.cache/puppeteer/chrome/linux-143.0.7499.169/chrome-linux64/chrome',
+      '/opt/render/.cache/puppeteer/chrome/linux-131.0.6778.204/chrome-linux64/chrome',
       '/usr/bin/chromium-browser',
       '/usr/bin/chromium',
       '/usr/bin/google-chrome',
       '/usr/bin/google-chrome-stable',
     ].filter(Boolean);
+    
+    // Diagnostic: Check what exists
+    console.log('🔍 Checking for Chrome at paths:');
+    for (const path of possiblePaths) {
+      const exists = fs.existsSync(path);
+      console.log(`  ${exists ? '✅' : '❌'} ${path}`);
+    }
     
     for (const execPath of possiblePaths) {
       try {
