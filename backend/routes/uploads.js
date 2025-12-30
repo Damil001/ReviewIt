@@ -19,8 +19,14 @@ if (!fs.existsSync(uploadsDir)) {
 
 // Browser instance for reuse
 let browserInstance = null;
+let browserUnavailable = false;
 
 async function getBrowser() {
+  // If we already know browser won't work, skip
+  if (browserUnavailable) {
+    return null;
+  }
+  
   if (!browserInstance) {
     const launchOptions = {
       headless: 'new',
@@ -32,16 +38,44 @@ async function getBrowser() {
         '--no-first-run',
         '--no-zygote',
         '--single-process',
+        '--disable-extensions',
       ],
     };
     
-    // Use custom executable path if set (for Render)
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    // Try multiple possible Chrome paths
+    const possiblePaths = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+    ].filter(Boolean);
+    
+    for (const execPath of possiblePaths) {
+      try {
+        if (fs.existsSync(execPath)) {
+          launchOptions.executablePath = execPath;
+          browserInstance = await puppeteer.launch(launchOptions);
+          console.log('✅ Browser launched successfully using:', execPath);
+          return browserInstance;
+        }
+      } catch (e) {
+        console.log(`⚠️  Failed to launch with ${execPath}:`, e.message);
+      }
     }
     
-    browserInstance = await puppeteer.launch(launchOptions);
-    console.log('✅ Browser launched successfully');
+    // Try without specifying executable (uses bundled Chromium)
+    try {
+      delete launchOptions.executablePath;
+      browserInstance = await puppeteer.launch(launchOptions);
+      console.log('✅ Browser launched with bundled Chromium');
+      return browserInstance;
+    } catch (e) {
+      console.log('⚠️  Browser launch failed:', e.message);
+      console.log('📸 Screenshots will be skipped in production');
+      browserUnavailable = true;
+      return null;
+    }
   }
   return browserInstance;
 }
@@ -167,8 +201,8 @@ router.post('/screenshot-base64', express.json({ limit: '10mb' }), async (req, r
   }
 });
 
-// Server-side screenshot capture using Puppeteer
-router.post('/capture-screenshot', express.json(), async (req, res) => {
+// Server-side screenshot capture - external API or Puppeteer
+router.post('/capture-screenshot', express.json({ limit: '10mb' }), async (req, res) => {
   let page = null;
   
   try {
@@ -177,16 +211,57 @@ router.post('/capture-screenshot', express.json(), async (req, res) => {
     if (!url) {
       return res.status(400).json({ error: 'URL is required' });
     }
+    
+    const width = Math.min(viewportWidth || 1200, 1920);
+    const height = Math.min(viewportHeight || 800, 1080);
 
-    console.log('Capturing screenshot for:', url);
-    console.log('Comment position (%):', { x, y });
+    // Option 1: Try external screenshot API (most reliable for production)
+    const apiKey = process.env.SCREENSHOT_API_KEY;
+    if (apiKey) {
+      try {
+        console.log('📸 Using ScreenshotOne API for:', url);
+        const axios = (await import('axios')).default;
+        
+        const apiUrl = `https://api.screenshotone.com/take?access_key=${apiKey}&url=${encodeURIComponent(url)}&viewport_width=${width}&viewport_height=${height}&format=jpg&quality=75&block_ads=true&timeout=30`;
+        
+        const response = await axios.get(apiUrl, { 
+          responseType: 'arraybuffer',
+          timeout: 35000 
+        });
+        
+        if (response.status === 200 && response.data) {
+          const filename = generateFilename('jpg');
+          const result = await saveScreenshot(Buffer.from(response.data), filename, 'image/jpeg');
+          console.log('✅ Screenshot via API:', result.url);
+          return res.json({
+            success: true,
+            url: result.url,
+            filename: result.filename,
+            storage: result.storage,
+          });
+        }
+      } catch (apiError) {
+        console.log('⚠️  API screenshot failed:', apiError.message);
+      }
+    }
+
+    // Option 2: Try Puppeteer (works locally, may not work in prod)
+    console.log('📸 Trying Puppeteer for:', url);
 
     const browser = await getBrowser();
-    page = await browser.newPage();
     
-    // Set viewport size
-    const width = Math.min(viewportWidth || 800, 1200);
-    const height = Math.min(viewportHeight || 600, 900);
+    // If no browser available, skip screenshot
+    if (!browser) {
+      console.log('⚠️  No browser available, skipping screenshot');
+      return res.json({
+        success: true,
+        url: null,
+        skipped: true,
+        message: 'Add SCREENSHOT_API_KEY env var for production screenshots'
+      });
+    }
+    
+    page = await browser.newPage();
     
     await page.setViewport({
       width: width,
@@ -249,7 +324,7 @@ router.post('/capture-screenshot', express.json(), async (req, res) => {
     // Take screenshot as buffer
     const screenshotBuffer = await page.screenshot({
       type: 'jpeg',
-      quality: 85,
+      quality: 70, // Reduced for smaller file size
     });
 
     // Generate unique filename
