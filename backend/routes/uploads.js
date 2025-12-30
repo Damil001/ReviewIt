@@ -255,8 +255,8 @@ router.post('/capture-screenshot', express.json({ limit: '10mb' }), async (req, 
         console.log('📸 Using ScreenshotOne API for:', url);
         const axios = (await import('axios')).default;
         
-        // ScreenshotOne API parameters
-        const apiUrl = `https://api.screenshotone.com/take?access_key=${apiKey}&url=${encodeURIComponent(url)}&viewport_width=${width}&viewport_height=${height}&format=jpg&quality=75&block_ads=true&block_cookie_banners=true&timeout=30&delay=1`;
+        // ScreenshotOne API parameters (removed quality - not supported in free tier)
+        const apiUrl = `https://api.screenshotone.com/take?access_key=${apiKey}&url=${encodeURIComponent(url)}&viewport_width=${width}&viewport_height=${height}&format=jpg&block_ads=true&block_cookie_banners=true&timeout=30&delay=1`;
         
         const response = await axios.get(apiUrl, { 
           responseType: 'arraybuffer',
