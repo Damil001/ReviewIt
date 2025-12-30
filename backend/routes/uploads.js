@@ -51,18 +51,36 @@ async function getBrowser() {
         const chromeDir = path.join(cacheDir, 'chrome');
         if (fs.existsSync(chromeDir)) {
           const versions = fs.readdirSync(chromeDir);
+          console.log(`🔍 Found Chrome versions: ${versions.join(', ')}`);
           for (const version of versions) {
-            const chromePath = path.join(chromeDir, version, 'chrome-linux64', 'chrome');
-            if (fs.existsSync(chromePath)) {
-              foundChromePath = chromePath;
-              console.log(`🔍 Found Chrome at: ${chromePath}`);
-              break;
+            // Try different possible structures
+            const possibleStructures = [
+              path.join(chromeDir, version, 'chrome-linux64', 'chrome'),
+              path.join(chromeDir, version, 'chrome', 'chrome'),
+              path.join(chromeDir, version, 'chrome'),
+            ];
+            
+            for (const chromePath of possibleStructures) {
+              if (fs.existsSync(chromePath)) {
+                // Check if executable
+                try {
+                  fs.accessSync(chromePath, fs.constants.F_OK | fs.constants.X_OK);
+                  foundChromePath = chromePath;
+                  console.log(`✅ Found executable Chrome at: ${chromePath}`);
+                  break;
+                } catch (e) {
+                  console.log(`⚠️  Chrome found but not executable: ${chromePath}`);
+                }
+              }
             }
+            if (foundChromePath) break;
           }
         }
       } catch (e) {
         console.log('⚠️  Error searching cache dir:', e.message);
       }
+    } else {
+      console.log(`⚠️  Cache directory doesn't exist: ${cacheDir}`);
     }
     
     // Try multiple possible Chrome paths
@@ -248,61 +266,20 @@ router.post('/capture-screenshot', express.json({ limit: '10mb' }), async (req, 
     const width = Math.min(viewportWidth || 1200, 1920);
     const height = Math.min(viewportHeight || 800, 1080);
 
-    // Option 1: Try external screenshot API (most reliable for production)
-    const apiKey = process.env.SCREENSHOT_API_KEY;
-    if (apiKey) {
-      try {
-        console.log('📸 Using ScreenshotOne API for:', url);
-        const axios = (await import('axios')).default;
-        
-        // ScreenshotOne API parameters (removed quality - not supported in free tier)
-        const apiUrl = `https://api.screenshotone.com/take?access_key=${apiKey}&url=${encodeURIComponent(url)}&viewport_width=${width}&viewport_height=${height}&format=jpg&block_ads=true&block_cookie_banners=true&timeout=30&delay=1`;
-        
-        const response = await axios.get(apiUrl, { 
-          responseType: 'arraybuffer',
-          timeout: 35000,
-          validateStatus: (status) => status < 500, // Don't throw on 4xx
-        });
-        
-        if (response.status === 200 && response.data && response.data.length > 0) {
-          const filename = generateFilename('jpg');
-          const result = await saveScreenshot(Buffer.from(response.data), filename, 'image/jpeg');
-          console.log('✅ Screenshot via API:', result.url);
-          return res.json({
-            success: true,
-            url: result.url,
-            filename: result.filename,
-            storage: result.storage,
-          });
-        } else {
-          // Try to get error message from response
-          const errorText = response.data ? Buffer.from(response.data).toString('utf-8') : 'Unknown error';
-          console.log('⚠️  API returned status', response.status, ':', errorText.substring(0, 200));
-        }
-      } catch (apiError) {
-        const errorMsg = apiError.response?.data 
-          ? Buffer.from(apiError.response.data).toString('utf-8').substring(0, 200)
-          : apiError.message;
-        console.log('⚠️  API screenshot failed:', errorMsg);
-        console.log('💡 Check your SCREENSHOT_API_KEY is valid at screenshotone.com');
-      }
-    } else {
-      console.log('💡 Set SCREENSHOT_API_KEY env var for production screenshots');
-    }
-
-    // Option 2: Try Puppeteer (works locally, may not work in prod)
-    console.log('📸 Trying Puppeteer for:', url);
+    console.log('📸 Capturing screenshot with Puppeteer for:', url);
+    console.log('Comment position (%):', { x, y });
 
     const browser = await getBrowser();
     
     // If no browser available, skip screenshot
     if (!browser) {
-      console.log('⚠️  No browser available, skipping screenshot');
+      console.log('⚠️  Chrome/Puppeteer not available, skipping screenshot');
+      console.log('💡 Check Render logs for Chrome path diagnostics');
       return res.json({
         success: true,
         url: null,
         skipped: true,
-        message: 'Add SCREENSHOT_API_KEY env var for production screenshots'
+        message: 'Chrome not found - check PUPPETEER_EXECUTABLE_PATH or build logs'
       });
     }
     
