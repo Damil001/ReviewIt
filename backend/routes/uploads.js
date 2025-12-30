@@ -131,6 +131,46 @@ async function getBrowser() {
   return browserInstance;
 }
 
+// Check Chrome availability at startup (diagnostic)
+async function checkChromeAvailability() {
+  const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+  console.log('\n🔍 Checking Chrome availability...');
+  console.log(`   Cache directory: ${cacheDir}`);
+  console.log(`   Exists: ${fs.existsSync(cacheDir)}`);
+  
+  if (fs.existsSync(cacheDir)) {
+    try {
+      const chromeDir = path.join(cacheDir, 'chrome');
+      if (fs.existsSync(chromeDir)) {
+        const versions = fs.readdirSync(chromeDir);
+        console.log(`   Found Chrome versions: ${versions.join(', ')}`);
+        for (const version of versions) {
+          const chromePath = path.join(chromeDir, version, 'chrome-linux64', 'chrome');
+          if (fs.existsSync(chromePath)) {
+            try {
+              fs.accessSync(chromePath, fs.constants.F_OK | fs.constants.X_OK);
+              console.log(`   ✅ Executable Chrome found: ${chromePath}`);
+            } catch (e) {
+              console.log(`   ⚠️  Chrome found but not executable: ${chromePath}`);
+            }
+          }
+        }
+      } else {
+        console.log(`   ⚠️  Chrome directory doesn't exist: ${chromeDir}`);
+      }
+    } catch (e) {
+      console.log(`   ⚠️  Error checking: ${e.message}`);
+    }
+  } else {
+    console.log(`   ⚠️  Cache directory doesn't exist - Chrome may not be installed`);
+    console.log(`   💡 Make sure build command includes: npx puppeteer browsers install chrome`);
+  }
+  console.log('');
+}
+
+// Run check on module load
+checkChromeAvailability();
+
 // Always use memory storage - we decide at request time whether to save to cloud or local
 const upload = multer({
   storage: multer.memoryStorage(),
