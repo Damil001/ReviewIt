@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Eye, EyeOff, Mail, Lock, Loader2, Sparkles } from 'lucide-react';
-import { API_BASE_URL } from '../config.js';
+import { SERVER_BASE_URL } from '../config.js';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -131,7 +131,7 @@ export default function Login() {
             type="button"
             variant="outline"
             onClick={() => {
-              window.location.href = `${API_BASE_URL.replace('/api', '')}/auth/google`;
+              window.location.href = `${SERVER_BASE_URL}/api/auth/google`;
             }}
             className="w-full h-11 border-border/50 hover:bg-secondary/50 transition-all"
           >
