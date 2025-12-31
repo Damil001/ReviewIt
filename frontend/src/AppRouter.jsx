@@ -5,6 +5,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import ProjectView from './pages/ProjectView';
 import SharedProjectView from './pages/SharedProjectView';
+import AuthCallback from './pages/AuthCallback';
 import { Loader2 } from 'lucide-react';
 
 function PrivateRoute({ children }) {
@@ -29,6 +30,7 @@ export default function AppRouter() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
       {/* Public share route - no authentication required */}
       <Route path="/share/:token" element={<SharedProjectView />} />
       <Route
