@@ -9,6 +9,27 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem('token'));
 
+  // Listen for token updates (for OAuth callback)
+  useEffect(() => {
+    const handleTokenUpdate = () => {
+      const newToken = localStorage.getItem('token');
+      if (newToken && newToken !== token) {
+        setToken(newToken);
+      }
+    };
+
+    // Listen for custom event from AuthCallback
+    window.addEventListener('tokenUpdated', handleTokenUpdate);
+    
+    // Also listen for storage events (from other tabs)
+    window.addEventListener('storage', handleTokenUpdate);
+
+    return () => {
+      window.removeEventListener('tokenUpdated', handleTokenUpdate);
+      window.removeEventListener('storage', handleTokenUpdate);
+    };
+  }, [token]);
+
   // Set up axios interceptor
   useEffect(() => {
     if (token) {

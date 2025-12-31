@@ -1,13 +1,17 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import axios from 'axios';
+import { API_BASE_URL } from '../config.js';
 import { Loader2 } from 'lucide-react';
 
 export default function AuthCallback() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const [tokenSet, setTokenSet] = useState(false);
 
+  // Set token when callback received
   useEffect(() => {
     const token = searchParams.get('token');
     const success = searchParams.get('success');
@@ -19,23 +23,33 @@ export default function AuthCallback() {
       return;
     }
 
-    if (success && token) {
-      // Store token and fetch user
+    if (success && token && !tokenSet) {
+      // Store token
       localStorage.setItem('token', token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       
-      // The AuthContext will automatically fetch user on token change
-      // Just navigate to dashboard
-      navigate('/dashboard');
-    } else {
+      // Trigger AuthContext to update
+      window.dispatchEvent(new CustomEvent('tokenUpdated'));
+      setTokenSet(true);
+    } else if (!success && !error) {
       navigate('/login?error=invalid_callback');
     }
-  }, [searchParams, navigate]);
+  }, [searchParams, navigate, tokenSet]);
+
+  // Navigate to dashboard once user is loaded
+  useEffect(() => {
+    if (tokenSet && user && !authLoading) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [user, authLoading, tokenSet, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        <p className="text-muted-foreground">Completing sign in...</p>
+        <p className="text-muted-foreground">
+          {tokenSet ? 'Loading your account...' : 'Completing sign in...'}
+        </p>
       </div>
     </div>
   );
