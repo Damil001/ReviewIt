@@ -9,6 +9,7 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import passport from 'passport';
 import authRoutes from './routes/auth.js';
 import projectRoutes from './routes/projects.js';
 import reviewRoutes from './routes/reviews.js';
@@ -95,6 +96,7 @@ connectDB();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(passport.initialize());
 
 // Static files for overlay script
 app.use(express.static('public'));
