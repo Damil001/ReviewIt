@@ -1,39 +1,49 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '../config.js';
+import { createContext, useContext, useState, useEffect } from "react";
+import axios from "axios";
+import { API_BASE_URL } from "../config.js";
 
 const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [token, setToken] = useState(localStorage.getItem("token"));
 
   // Listen for token updates (for OAuth callback)
   useEffect(() => {
     const handleTokenUpdate = () => {
-      const newToken = localStorage.getItem('token');
+      const newToken = localStorage.getItem("token");
       if (newToken && newToken !== token) {
         setToken(newToken);
+        setLoading(true); // Reset loading to fetch user
       }
     };
 
     // Listen for custom event from AuthCallback
-    window.addEventListener('tokenUpdated', handleTokenUpdate);
-    
+    const tokenUpdatedHandler = () => {
+      // Check localStorage immediately when event fires
+      const newToken = localStorage.getItem("token");
+      if (newToken && newToken !== token) {
+        setToken(newToken);
+        setLoading(true);
+      }
+    };
+
+    window.addEventListener("tokenUpdated", tokenUpdatedHandler);
+
     // Also listen for storage events (from other tabs)
-    window.addEventListener('storage', handleTokenUpdate);
+    window.addEventListener("storage", handleTokenUpdate);
 
     return () => {
-      window.removeEventListener('tokenUpdated', handleTokenUpdate);
-      window.removeEventListener('storage', handleTokenUpdate);
+      window.removeEventListener("tokenUpdated", tokenUpdatedHandler);
+      window.removeEventListener("storage", handleTokenUpdate);
     };
   }, [token]);
 
   // Set up axios interceptor
   useEffect(() => {
     if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
       fetchUser();
     } else {
       setLoading(false);
@@ -45,7 +55,7 @@ export function AuthProvider({ children }) {
       const response = await axios.get(`${API_BASE_URL}/auth/me`);
       setUser(response.data.user);
     } catch (error) {
-      localStorage.removeItem('token');
+      localStorage.removeItem("token");
       setToken(null);
     } finally {
       setLoading(false);
@@ -59,15 +69,15 @@ export function AuthProvider({ children }) {
         password,
       });
       const { token: newToken, user } = response.data;
-      localStorage.setItem('token', newToken);
+      localStorage.setItem("token", newToken);
       setToken(newToken);
       setUser(user);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
       return { success: true };
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.error || 'Login failed',
+        error: error.response?.data?.error || "Login failed",
       };
     }
   };
@@ -80,24 +90,24 @@ export function AuthProvider({ children }) {
         password,
       });
       const { token: newToken, user } = response.data;
-      localStorage.setItem('token', newToken);
+      localStorage.setItem("token", newToken);
       setToken(newToken);
       setUser(user);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
       return { success: true };
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.error || 'Registration failed',
+        error: error.response?.data?.error || "Registration failed",
       };
     }
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
+    localStorage.removeItem("token");
     setToken(null);
     setUser(null);
-    delete axios.defaults.headers.common['Authorization'];
+    delete axios.defaults.headers.common["Authorization"];
   };
 
   return (
@@ -108,4 +118,3 @@ export function AuthProvider({ children }) {
 }
 
 export const useAuth = () => useContext(AuthContext);
-
