@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -58,6 +59,34 @@ const iconMap = {
   languages: Languages,
 };
 
+// Helper function to highlight mentions in text
+const highlightMentions = (text) => {
+  if (!text) return text;
+  const mentionRegex = /@([\w.-]+@[\w.-]+\.\w+)|@(\w+)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = mentionRegex.exec(text)) !== null) {
+    // Add text before the mention
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+    // Add highlighted mention
+    parts.push(
+      <span key={match.index} className="text-primary font-medium">
+        {match[0]}
+      </span>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+  return parts.length > 0 ? parts : text;
+};
+
 export default function CommentsSidebar({
   isOpen,
   onClose,
@@ -65,7 +94,10 @@ export default function CommentsSidebar({
   onCommentsUpdate,
   currentUser = 'Anonymous',
   projectUrl,
+  projectId,
 }) {
+  console.log('🎬 CommentsSidebar component rendered:', { isOpen, projectId, projectUrl, hasComments: comments?.length });
+  
   const [expandedComments, setExpandedComments] = useState(new Set());
   const [replyingTo, setReplyingTo] = useState(null);
   const [replyText, setReplyText] = useState('');
@@ -75,8 +107,15 @@ export default function CommentsSidebar({
   const [imagePreview, setImagePreview] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showFullReplyImage, setShowFullReplyImage] = useState(null);
+  const [collaborators, setCollaborators] = useState([]);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
+  const [mentionPosition, setMentionPosition] = useState({ top: 0, left: 0 });
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   const replyInputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
+  const mentionSuggestionsRef = useRef(null);
 
   useEffect(() => {
     if (replyingTo && replyInputRef.current) {
@@ -90,6 +129,200 @@ export default function CommentsSidebar({
       setSelectedComment(null);
     }
   }, [isOpen]);
+
+  // Fetch project participants for mentions
+  useEffect(() => {
+    console.log('📋 CommentsSidebar useEffect triggered:', { projectId, projectUrl, isOpen });
+    
+    if (!projectId) {
+      // Try to get from share token if no projectId
+      const shareToken = window.location.pathname.split('/share/')[1];
+      if (shareToken) {
+        console.log('🔗 CommentsSidebar: No projectId, trying share token:', shareToken);
+        fetchParticipantsFromShare(shareToken);
+      } else {
+        console.warn('⚠️ CommentsSidebar: No projectId and no share token found');
+      }
+      return;
+    }
+
+    console.log('🚀 CommentsSidebar: Starting to fetch participants for projectId:', projectId);
+    fetchParticipants();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]); // Only depend on projectId, not isOpen
+
+  const fetchParticipants = async () => {
+    console.log('🔄 CommentsSidebar fetchParticipants called for projectId:', projectId);
+    try {
+      // Try to get participants endpoint first (for authenticated users)
+      try {
+        const response = await axios.get(`${API_BASE_URL}/projects/${projectId}/participants`);
+        const participants = response.data.participants || [];
+        console.log('✅ CommentsSidebar: Fetched participants from /participants endpoint:', participants.length, participants);
+        setCollaborators(participants);
+        return;
+      } catch (err) {
+        // If that fails, try regular project endpoint
+        console.log("⚠️ CommentsSidebar: Participants endpoint failed, trying project endpoint", err.response?.status, err.message);
+      }
+
+      // Fallback to project endpoint
+      const response = await axios.get(`${API_BASE_URL}/projects/${projectId}`);
+      const project = response.data.project;
+      const allUsers = [
+        project.owner,
+        ...(project.collaborators || []),
+        ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
+      ].filter(Boolean);
+      console.log('✅ CommentsSidebar: Fetched users from project endpoint:', allUsers.length, allUsers);
+      setCollaborators(allUsers);
+    } catch (error) {
+      console.error("❌ CommentsSidebar: Error fetching participants:", error.response?.status, error.message);
+      // If both fail, try share endpoint (for shared projects)
+      const shareToken = window.location.pathname.split('/share/')[1];
+      if (shareToken) {
+        console.log('🔄 CommentsSidebar: Trying share endpoint as fallback');
+        fetchParticipantsFromShare(shareToken);
+      }
+    }
+  };
+
+  const fetchParticipantsFromShare = async (shareToken) => {
+    console.log('🔄 CommentsSidebar fetchParticipantsFromShare called for token:', shareToken);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/share/${shareToken}`);
+      const project = response.data.project;
+      const allUsers = [
+        project.owner,
+        ...(project.collaborators || []),
+        ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
+      ].filter(Boolean);
+      console.log('✅ CommentsSidebar: Fetched users from share endpoint:', allUsers.length, allUsers);
+      setCollaborators(allUsers);
+    } catch (shareError) {
+      console.error("❌ CommentsSidebar: Error fetching from share endpoint:", shareError.response?.status, shareError.message);
+    }
+  };
+
+  // Filter collaborators based on mention query
+  const filteredCollaborators = collaborators.filter((user) => {
+    if (!mentionQuery) return true;
+    const name = (user.name || "").toLowerCase();
+    const email = (user.email || "").toLowerCase();
+    return name.includes(mentionQuery) || email.includes(mentionQuery);
+  });
+
+  // Handle mention detection in textarea
+  const handleTextChange = (e) => {
+    console.log('🟢 CommentsSidebar handleTextChange CALLED!', e.target.value);
+    const text = e.target.value;
+    setReplyText(text);
+
+    // Get cursor position
+    const cursorPos = e.target.selectionStart || text.length;
+    const textBeforeCursor = text.substring(0, cursorPos);
+    
+    // Check if we're typing a mention
+    const mentionMatch = textBeforeCursor.match(/@([\w.-@]*)$/);
+    
+    console.log('🔍 CommentsSidebar mention check:', {
+      text,
+      cursorPos,
+      textBeforeCursor,
+      hasMatch: !!mentionMatch,
+      collaboratorsCount: collaborators.length,
+      projectId
+    });
+    
+    if (mentionMatch) {
+      const query = (mentionMatch[1] || '').toLowerCase();
+      setMentionQuery(query);
+      
+      // Get textarea position for suggestions dropdown
+      const textarea = e.target;
+      const rect = textarea.getBoundingClientRect();
+      
+      // Simple positioning - show below textarea
+      const atPosition = {
+        top: rect.bottom + window.scrollY + 5,
+        left: rect.left + window.scrollX + 10,
+      };
+      
+      setMentionPosition(atPosition);
+      setShowMentionSuggestions(true);
+      setSelectedMentionIndex(0);
+      
+      console.log('✅ CommentsSidebar showing mention dropdown:', {
+        position: atPosition,
+        collaboratorsCount: collaborators.length,
+        filteredCount: filteredCollaborators.length,
+        query
+      });
+    } else {
+      if (showMentionSuggestions) {
+        setShowMentionSuggestions(false);
+        console.log('❌ CommentsSidebar hiding mention dropdown');
+      }
+    }
+  };
+
+  // Insert mention into text
+  const insertMention = (user) => {
+    const text = replyText;
+    const cursorPos = textareaRef.current?.selectionStart || text.length;
+    const textBeforeCursor = text.substring(0, cursorPos);
+    const textAfterCursor = text.substring(cursorPos);
+    
+    // Find the @ mention to replace
+    const mentionMatch = textBeforeCursor.match(/@([\w.-@]*)$/);
+    if (mentionMatch) {
+      const startPos = mentionMatch.index;
+      const newText = 
+        text.substring(0, startPos) + 
+        `@${user.email || user.name}` + 
+        " " + 
+        textAfterCursor;
+      
+      setReplyText(newText);
+      setShowMentionSuggestions(false);
+      
+      // Set cursor position after the mention
+      setTimeout(() => {
+        if (textareaRef.current) {
+          const newCursorPos = startPos + `@${user.email || user.name} `.length;
+          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+          textareaRef.current.focus();
+        }
+      }, 0);
+    }
+  };
+
+  // Handle keyboard navigation in mention suggestions
+  const handleKeyDown = (e) => {
+    if (showMentionSuggestions) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedMentionIndex((prev) =>
+          Math.min(prev + 1, filteredCollaborators.length - 1)
+        );
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedMentionIndex((prev) => Math.max(prev - 1, 0));
+      } else if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        if (filteredCollaborators[selectedMentionIndex]) {
+          insertMention(filteredCollaborators[selectedMentionIndex]);
+        }
+      } else if (e.key === "Escape") {
+        setShowMentionSuggestions(false);
+      }
+      } else {
+        // Normal keyboard handling when not in mention mode
+        if (e.key === 'Enter' && e.ctrlKey && selectedComment?.id) {
+          handleReplySubmit(selectedComment.id);
+        }
+      }
+    };
 
   const toggleExpanded = (commentId) => {
     setExpandedComments((prev) => {
@@ -151,7 +384,7 @@ export default function CommentsSidebar({
     }
   };
 
-  const handleReply = async (commentId) => {
+  const handleReplySubmit = async (commentId) => {
     if ((!replyText.trim() && !imagePreview) || sending) return;
 
     setSending(true);
@@ -302,7 +535,7 @@ export default function CommentsSidebar({
                       )}
                     </div>
                     <p className="mt-1.5 text-sm text-foreground/90 leading-relaxed">
-                      {selectedComment.text}
+                      {highlightMentions(selectedComment.text)}
                     </p>
                   </div>
                 </div>
@@ -329,7 +562,7 @@ export default function CommentsSidebar({
                           </span>
                         </div>
                         <p className="text-xs text-foreground/80 mt-1 leading-relaxed">
-                          {reply.text}
+                          {highlightMentions(reply.text)}
                         </p>
                         {/* Reply Image */}
                         {reply.image && (
@@ -377,17 +610,81 @@ export default function CommentsSidebar({
                   </div>
                 )}
                 
-                <Textarea
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                  placeholder="Write a reply..."
-                  className="min-h-[60px] text-sm bg-background/50 border-border/50 resize-none mb-2"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.ctrlKey) {
-                      handleReply(selectedComment.id);
-                    }
-                  }}
-                />
+                <div className="relative mb-2">
+                  <Textarea
+                    ref={textareaRef}
+                    value={replyText}
+                    onChange={(e) => {
+                      console.log('🟢 CommentsSidebar Textarea onChange FIRED!', e.target.value);
+                      handleTextChange(e);
+                    }}
+                    placeholder="Write a reply... Use @ to mention someone"
+                    className="min-h-[60px] text-sm bg-background/50 border-border/50 resize-none"
+                    onKeyDown={handleKeyDown}
+                    onBlur={(e) => {
+                      // Delay hiding suggestions to allow clicking on them
+                      setTimeout(() => {
+                        if (!mentionSuggestionsRef.current?.contains(document.activeElement)) {
+                          setShowMentionSuggestions(false);
+                        }
+                      }, 200);
+                    }}
+                  />
+                  
+                  {/* Mention Suggestions Dropdown - Render via portal to escape Sheet z-index */}
+                  {showMentionSuggestions && (() => {
+                    console.log('🎯 CommentsSidebar: Rendering dropdown via portal', {
+                      showMentionSuggestions,
+                      position: mentionPosition,
+                      filteredCount: filteredCollaborators.length
+                    });
+                    return createPortal(
+                      <div
+                        ref={mentionSuggestionsRef}
+                        className="fixed z-[99999999] bg-background border border-border/50 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+                        style={{
+                          top: `${mentionPosition.top}px`,
+                          left: `${mentionPosition.left}px`,
+                          minWidth: '200px',
+                        }}
+                      >
+                      {filteredCollaborators.length > 0 ? (
+                        filteredCollaborators.map((user, index) => (
+                          <div
+                            key={user.id || user._id || index}
+                            className={`px-3 py-2 cursor-pointer flex items-center gap-2 ${
+                              index === selectedMentionIndex
+                                ? "bg-primary/20 text-primary"
+                                : "hover:bg-accent"
+                            }`}
+                            onClick={() => insertMention(user)}
+                            onMouseEnter={() => setSelectedMentionIndex(index)}
+                          >
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-xs font-semibold text-white shrink-0">
+                              {user.name?.charAt(0).toUpperCase() || "U"}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">
+                                {user.name || "Unknown"}
+                              </div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {user.email}
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          {collaborators.length === 0 
+                            ? "Loading users..." 
+                            : "No users found"}
+                        </div>
+                      )}
+                      </div>,
+                      document.body
+                    );
+                  })()}
+                </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     {/* Hidden file input */}
@@ -418,7 +715,7 @@ export default function CommentsSidebar({
                   <Button
                     size="sm"
                     className="h-7 text-xs gap-1.5 bg-gradient-to-r from-primary to-blue-600"
-                    onClick={() => handleReply(selectedComment.id)}
+                    onClick={() => handleReplySubmit(selectedComment.id)}
                     disabled={(!replyText.trim() && !imagePreview) || sending}
                   >
                     <Send className="w-3 h-3" />

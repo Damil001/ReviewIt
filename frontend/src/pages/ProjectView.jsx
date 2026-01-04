@@ -384,6 +384,7 @@ export default function ProjectView() {
         onCommentsUpdate={fetchComments}
         currentUser={user?.name || 'Anonymous'}
         projectUrl={project.url}
+        projectId={id}
       />
     </div>
   );

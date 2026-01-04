@@ -216,6 +216,7 @@ export default function CommentThread({
 
   // Handle mention detection in textarea
   const handleTextChange = (e) => {
+    console.log('🟢 handleTextChange CALLED!', e.target.value);
     const text = e.target.value;
     setReplyText(text);
 
@@ -542,7 +543,13 @@ export default function CommentThread({
             <Textarea
               ref={textareaRef}
               value={replyText}
-              onChange={handleTextChange}
+              onChange={(e) => {
+                console.log('🟢 TEXTAREA onChange FIRED!', e.target.value);
+                handleTextChange(e);
+              }}
+              onInput={(e) => {
+                console.log('🟡 TEXTAREA onInput FIRED!', e.target.value);
+              }}
               placeholder="Write a reply... Use @ to mention someone"
               className="bg-background/50 border-border/50 min-h-[80px] resize-none text-sm"
               disabled={isSending}
