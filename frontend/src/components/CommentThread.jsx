@@ -81,54 +81,67 @@ export default function CommentThread({
 
   // Fetch project participants for mentions
   useEffect(() => {
-    if (!projectId) return;
-
-    const fetchParticipants = async () => {
-      try {
-        // Try to get participants endpoint first (for authenticated users)
-        try {
-          const response = await axios.get(`${API_BASE_URL}/projects/${projectId}/participants`);
-          const participants = response.data.participants || [];
-          setCollaborators(participants);
-          return;
-        } catch (err) {
-          // If that fails, try regular project endpoint
-          console.log("Participants endpoint not available, trying project endpoint");
-        }
-
-        // Fallback to project endpoint
-        const response = await axios.get(`${API_BASE_URL}/projects/${projectId}`);
-        const project = response.data.project;
-        const allUsers = [
-          project.owner,
-          ...(project.collaborators || []),
-          ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
-        ].filter(Boolean);
-        setCollaborators(allUsers);
-      } catch (error) {
-        console.error("Error fetching participants:", error);
-        // If both fail, try share endpoint (for shared projects)
-        try {
-          // Extract share token from URL if available
-          const shareToken = window.location.pathname.split('/share/')[1];
-          if (shareToken) {
-            const response = await axios.get(`${API_BASE_URL}/share/${shareToken}`);
-            const project = response.data.project;
-            const allUsers = [
-              project.owner,
-              ...(project.collaborators || []),
-              ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
-            ].filter(Boolean);
-            setCollaborators(allUsers);
-          }
-        } catch (shareError) {
-          console.error("Error fetching from share endpoint:", shareError);
-        }
+    if (!projectId) {
+      // Try to get from share token if no projectId
+      const shareToken = window.location.pathname.split('/share/')[1];
+      if (shareToken) {
+        fetchParticipantsFromShare(shareToken);
       }
-    };
+      return;
+    }
 
     fetchParticipants();
   }, [projectId]);
+
+  const fetchParticipants = async () => {
+    try {
+      // Try to get participants endpoint first (for authenticated users)
+      try {
+        const response = await axios.get(`${API_BASE_URL}/projects/${projectId}/participants`);
+        const participants = response.data.participants || [];
+        console.log('Fetched participants:', participants);
+        setCollaborators(participants);
+        return;
+      } catch (err) {
+        // If that fails, try regular project endpoint
+        console.log("Participants endpoint not available, trying project endpoint", err);
+      }
+
+      // Fallback to project endpoint
+      const response = await axios.get(`${API_BASE_URL}/projects/${projectId}`);
+      const project = response.data.project;
+      const allUsers = [
+        project.owner,
+        ...(project.collaborators || []),
+        ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
+      ].filter(Boolean);
+      console.log('Fetched users from project endpoint:', allUsers);
+      setCollaborators(allUsers);
+    } catch (error) {
+      console.error("Error fetching participants:", error);
+      // If both fail, try share endpoint (for shared projects)
+      const shareToken = window.location.pathname.split('/share/')[1];
+      if (shareToken) {
+        fetchParticipantsFromShare(shareToken);
+      }
+    }
+  };
+
+  const fetchParticipantsFromShare = async (shareToken) => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/share/${shareToken}`);
+      const project = response.data.project;
+      const allUsers = [
+        project.owner,
+        ...(project.collaborators || []),
+        ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
+      ].filter(Boolean);
+      console.log('Fetched users from share endpoint:', allUsers);
+      setCollaborators(allUsers);
+    } catch (shareError) {
+      console.error("Error fetching from share endpoint:", shareError);
+    }
+  };
 
   // Handle image file selection
   const handleImageSelect = async (e) => {
@@ -193,26 +206,45 @@ export default function CommentThread({
     const cursorPos = e.target.selectionStart;
     const textBeforeCursor = text.substring(0, cursorPos);
     
-    // Check if we're typing a mention (supports @username or @email)
-    const mentionMatch = textBeforeCursor.match(/@([\w.-]*@?[\w.-]*)$/);
+    // Check if we're typing a mention (supports @username or @email, including just @)
+    // Match @ followed by optional characters (word chars, dots, dashes, or @ for email)
+    // Also check for @ at the end of text (no space after)
+    const mentionMatch = textBeforeCursor.match(/@([\w.-@]*)$/);
     
-    if (mentionMatch && collaborators.length > 0) {
-      const query = mentionMatch[1].toLowerCase();
+    console.log('Text change:', { text, cursorPos, textBeforeCursor, mentionMatch, collaboratorsCount: collaborators.length });
+    
+    if (mentionMatch) {
+      const query = (mentionMatch[1] || '').toLowerCase();
       setMentionQuery(query);
       
-      // Get textarea position for suggestions dropdown
-      const textarea = e.target;
-      const rect = textarea.getBoundingClientRect();
-      
-      // Simple positioning - show below textarea
-      const atPosition = {
-        top: rect.bottom + window.scrollY + 5,
-        left: rect.left + window.scrollX + 10,
-      };
-      
-      setMentionPosition(atPosition);
-      setShowMentionSuggestions(true);
-      setSelectedMentionIndex(0);
+      if (collaborators.length > 0) {
+        // Get textarea position for suggestions dropdown
+        const textarea = e.target;
+        const rect = textarea.getBoundingClientRect();
+        
+        // Simple positioning - show below textarea
+        const atPosition = {
+          top: rect.bottom + window.scrollY + 5,
+          left: rect.left + window.scrollX + 10,
+        };
+        
+        setMentionPosition(atPosition);
+        setShowMentionSuggestions(true);
+        setSelectedMentionIndex(0);
+        console.log('Showing mention suggestions with', filteredCollaborators.length, 'users');
+      } else {
+        // If @ is typed but collaborators haven't loaded yet
+        console.log('@ typed but collaborators not loaded yet. Current count:', collaborators.length);
+        // Still show the dropdown but it will be empty - this helps debug
+        const textarea = e.target;
+        const rect = textarea.getBoundingClientRect();
+        const atPosition = {
+          top: rect.bottom + window.scrollY + 5,
+          left: rect.left + window.scrollX + 10,
+        };
+        setMentionPosition(atPosition);
+        setShowMentionSuggestions(true);
+      }
     } else {
       setShowMentionSuggestions(false);
     }
@@ -223,8 +255,22 @@ export default function CommentThread({
     if (!mentionQuery) return true;
     const name = (user.name || "").toLowerCase();
     const email = (user.email || "").toLowerCase();
-    return name.includes(mentionQuery) || email.includes(mentionQuery);
+    const matches = name.includes(mentionQuery) || email.includes(mentionQuery);
+    return matches;
   });
+  
+  // Debug log
+  useEffect(() => {
+    if (showMentionSuggestions) {
+      console.log('Mention suggestions state:', {
+        showMentionSuggestions,
+        collaboratorsCount: collaborators.length,
+        filteredCount: filteredCollaborators.length,
+        mentionQuery,
+        collaborators: collaborators.map(u => ({ name: u.name, email: u.email }))
+      });
+    }
+  }, [showMentionSuggestions, collaborators, filteredCollaborators, mentionQuery]);
 
   // Insert mention into text
   const insertMention = (user) => {
@@ -490,40 +536,48 @@ export default function CommentThread({
             />
             
             {/* Mention Suggestions Dropdown */}
-            {showMentionSuggestions && filteredCollaborators.length > 0 && (
+            {showMentionSuggestions && (
               <div
                 ref={mentionSuggestionsRef}
-                className="fixed z-50 bg-background border border-border/50 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+                className="fixed z-[99999999] bg-background border border-border/50 rounded-lg shadow-lg max-h-48 overflow-y-auto"
                 style={{
                   top: `${mentionPosition.top}px`,
                   left: `${mentionPosition.left}px`,
                   minWidth: '200px',
                 }}
               >
-                {filteredCollaborators.map((user, index) => (
-                  <div
-                    key={user._id || user.id || index}
-                    className={`px-3 py-2 cursor-pointer flex items-center gap-2 ${
-                      index === selectedMentionIndex
-                        ? "bg-primary/20 text-primary"
-                        : "hover:bg-accent"
-                    }`}
-                    onClick={() => insertMention(user)}
-                    onMouseEnter={() => setSelectedMentionIndex(index)}
-                  >
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-xs font-semibold text-white shrink-0">
-                      {user.name?.charAt(0).toUpperCase() || "U"}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">
-                        {user.name || "Unknown"}
+                {filteredCollaborators.length > 0 ? (
+                  filteredCollaborators.map((user, index) => (
+                    <div
+                      key={user.id || user._id || index}
+                      className={`px-3 py-2 cursor-pointer flex items-center gap-2 ${
+                        index === selectedMentionIndex
+                          ? "bg-primary/20 text-primary"
+                          : "hover:bg-accent"
+                      }`}
+                      onClick={() => insertMention(user)}
+                      onMouseEnter={() => setSelectedMentionIndex(index)}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-xs font-semibold text-white shrink-0">
+                        {user.name?.charAt(0).toUpperCase() || "U"}
                       </div>
-                      <div className="text-xs text-muted-foreground truncate">
-                        {user.email}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">
+                          {user.name || "Unknown"}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {user.email}
+                        </div>
                       </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">
+                    {collaborators.length === 0 
+                      ? "Loading users..." 
+                      : "No users found"}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </div>
