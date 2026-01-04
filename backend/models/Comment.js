@@ -18,6 +18,11 @@ const replySchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  // Tagged users in this reply
+  taggedUsers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  }],
 });
 
 const commentSchema = new mongoose.Schema({
@@ -68,6 +73,11 @@ const commentSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Tagged users in this comment
+  taggedUsers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  }],
   // Replies to this comment
   replies: [replySchema],
   // Browser/device metadata captured at comment creation

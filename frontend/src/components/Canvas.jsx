@@ -48,6 +48,11 @@ export default function Canvas({
   const [breakpoints, setBreakpoints] = useState(
     (initialBreakpoints && initialBreakpoints.length > 0) ? initialBreakpoints : defaultBreakpoints
   );
+  // Store browser selection for each breakpoint (default to chromium)
+  const [browserSelections, setBrowserSelections] = useState(() => {
+    const initialBps = (initialBreakpoints && initialBreakpoints.length > 0) ? initialBreakpoints : defaultBreakpoints;
+    return initialBps.map(bp => bp.browser || 'chromium');
+  });
   const [pan, setPan] = useState(
     initialCanvasState?.pan || { x: 0, y: 0 }
   );
@@ -302,6 +307,8 @@ export default function Canvas({
   const handleAddBreakpoint = (newBreakpoint) => {
     const updatedBreakpoints = [...breakpoints, newBreakpoint];
     setBreakpoints(updatedBreakpoints);
+    // Add default browser selection for new breakpoint
+    setBrowserSelections([...browserSelections, 'chromium']);
     
     // Calculate position for new breakpoint (place it after the last one)
     const lastPosition = framePositions[framePositions.length - 1];
@@ -313,6 +320,12 @@ export default function Canvas({
     setFramePositions([...framePositions, { x: newX, y: newY }]);
   };
 
+  const handleBrowserChange = (breakpointIndex, browser) => {
+    const updated = [...browserSelections];
+    updated[breakpointIndex] = browser;
+    setBrowserSelections(updated);
+  };
+
   const handleDeleteBreakpoint = (index) => {
     if (breakpoints.length <= 1) {
       alert('You must have at least one breakpoint');
@@ -321,10 +334,29 @@ export default function Canvas({
     
     const updatedBreakpoints = breakpoints.filter((_, i) => i !== index);
     const updatedPositions = framePositions.filter((_, i) => i !== index);
+    const updatedBrowsers = browserSelections.filter((_, i) => i !== index);
     
     setBreakpoints(updatedBreakpoints);
     setFramePositions(updatedPositions);
+    setBrowserSelections(updatedBrowsers);
   };
+
+  // Save breakpoints with browser selections when they change
+  useEffect(() => {
+    if (onSave && breakpoints.length > 0) {
+      // Merge browser selections into breakpoints for saving
+      const breakpointsWithBrowsers = breakpoints.map((bp, index) => ({
+        ...bp,
+        browser: browserSelections[index] || 'chromium',
+      }));
+      
+      onSave(breakpointsWithBrowsers, {
+        pan,
+        zoom,
+        framePositions,
+      });
+    }
+  }, [breakpoints, browserSelections, pan, zoom, framePositions, onSave]);
 
   // Convert zoom to percentage for display
   const zoomPercent = Math.round(zoom * 100);
@@ -429,8 +461,13 @@ export default function Canvas({
                 currentUser={currentUser}
                 projectId={projectId}
                 onCommentsUpdate={onCommentsUpdate}
+                breakpointIndex={index}
+                reviewToolState={overlayMode === 'draw' ? reviewToolState : null}
+                browser={browserSelections[index] || 'chromium'}
+                onBrowserChange={(browser) => handleBrowserChange(index, browser)}
               />
-              {reviewMode && selectedBreakpoint === index && reviews
+              {/* Show reviews in review mode, or show drawings when in draw mode */}
+              {((reviewMode && selectedBreakpoint === index) || (overlayMode === 'draw')) && reviews
                 .filter(r => r.breakpointIndex === index)
                 .map((review) => (
                   <ReviewMarker

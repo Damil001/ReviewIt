@@ -34,6 +34,68 @@ const userSchema = new mongoose.Schema({
     enum: ['local', 'google'],
     default: 'local',
   },
+  // Subscription fields
+  subscriptionStatus: {
+    type: String,
+    enum: ['trial', 'active', 'past_due', 'canceled', 'expired'],
+    default: 'trial',
+  },
+  trialStartDate: {
+    type: Date,
+    default: Date.now,
+  },
+  trialEndDate: {
+    type: Date,
+  },
+  subscriptionStartDate: {
+    type: Date,
+  },
+  subscriptionEndDate: {
+    type: Date,
+  },
+  seats: {
+    type: Number,
+    default: 1,
+    min: 1,
+  },
+  stripeCustomerId: {
+    type: String,
+    sparse: true,
+  },
+  stripeSubscriptionId: {
+    type: String,
+    sparse: true,
+  },
+  stripePriceId: {
+    type: String,
+    sparse: true,
+  },
+  paddleCustomerId: {
+    type: String,
+    sparse: true,
+  },
+  paddleSubscriptionId: {
+    type: String,
+    sparse: true,
+  },
+  // Manual payment fields
+  paymentMethod: {
+    type: String,
+    enum: ['stripe', 'paddle', 'paypal', 'bank_transfer', 'manual'],
+    default: null,
+  },
+  paymentReference: {
+    type: String, // Transaction ID, receipt number, etc.
+    sparse: true,
+  },
+  paymentNotes: {
+    type: String, // Admin notes about payment
+    sparse: true,
+  },
+  isAdmin: {
+    type: Boolean,
+    default: false,
+  },
 }, {
   timestamps: true,
 });

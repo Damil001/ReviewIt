@@ -16,6 +16,8 @@ export default function ReviewOverlay({
   currentUser = 'Anonymous',
   projectId,
   onCommentsUpdate,
+  reviewToolState = null, // { color, lineWidth } for drawing
+  breakpointIndex = 0, // Index of the breakpoint for saving reviews
 }) {
   const [comments, setComments] = useState([]);
   const [activeComment, setActiveComment] = useState(null);
@@ -377,18 +379,67 @@ export default function ReviewOverlay({
     }
   };
 
-  const handleDrawingComplete = (drawingData) => {
-    setDrawings(prev => [...prev, drawingData]);
-    
-    // Broadcast via socket
-    if (socket) {
-      socket.emit('drawing-end', {
-        url: targetUrl,
-        breakpoint,
-        drawing: drawingData,
+  const handleDrawingComplete = async (drawingData) => {
+    if (!projectId || !drawingData || !drawingData.path || drawingData.path.length === 0) {
+      return;
+    }
+
+    try {
+      // Convert path to SVG string for storage
+      const svgPath = drawingData.path
+        .map((point, index) => {
+          if (index === 0) return `M ${point.x} ${point.y}`;
+          return `L ${point.x} ${point.y}`;
+        })
+        .join(' ');
+
+      // Get the bounding box of the drawing
+      const xs = drawingData.path.map(p => p.x);
+      const ys = drawingData.path.map(p => p.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+
+      // Create review with drawing
+      const response = await axios.post(`${API_BASE_URL}/reviews`, {
+        projectId,
+        breakpointIndex: breakpointIndex,
+        type: 'drawing',
+        position: {
+          x: minX,
+          y: minY,
+          width: maxX - minX,
+          height: maxY - minY,
+        },
+        drawing: JSON.stringify({
+          path: drawingData.path,
+          svg: svgPath,
+          color: drawingData.color,
+          lineWidth: drawingData.lineWidth,
+        }),
+        color: drawingData.color || '#ff4444',
       });
+
+      // Broadcast via socket
+      if (socket) {
+        socket.emit('drawing-end', {
+          url: targetUrl,
+          breakpoint,
+          drawing: drawingData,
+        });
+      }
+
+      // Notify parent to refresh reviews
+      onCommentsUpdate?.();
+      
+      // Clear the drawing from local state
+      setDrawings(prev => prev.filter(d => d !== drawingData));
+    } catch (error) {
+      console.error('Error saving drawing:', error);
     }
   };
+
 
   // Render modal using Portal to escape container constraints
   const renderModal = () => {
@@ -477,6 +528,7 @@ export default function ReviewOverlay({
         onResolve={handleResolve}
         onDelete={handleDelete}
         currentUser={currentUser}
+        projectId={projectId}
       />,
       document.body
     );
@@ -487,13 +539,23 @@ export default function ReviewOverlay({
       {renderModal()}
       {renderCommentThread()}
 
-      {/* Drawing Canvas */}
-      {mode === 'draw' && (
+      {/* Drawing Canvas - positioned over the iframe */}
+      {mode === 'draw' && iframeRef?.current && (
         <DrawingCanvas
           enabled={mode === 'draw'}
-          color="#FF6B6B"
-          lineWidth={2}
+          color={reviewToolState?.color || '#FF6B6B'}
+          lineWidth={reviewToolState?.lineWidth || 3}
           onDrawingComplete={handleDrawingComplete}
+          onDrawingUpdate={(path) => {
+            // Broadcast drawing updates in real-time
+            if (socket && path.length > 0) {
+              socket.emit('drawing-update', {
+                url: targetUrl,
+                breakpoint,
+                path: path,
+              });
+            }
+          }}
         />
       )}
     </>

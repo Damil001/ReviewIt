@@ -4,6 +4,7 @@ import axios from 'axios';
 import Canvas from '../components/Canvas';
 import Toolbar from '../components/Toolbar';
 import CommentsSidebar from '../components/CommentsSidebar';
+import ProjectParticipants from '../components/ProjectParticipants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -78,7 +79,12 @@ export default function SharedProjectView() {
         headers['x-share-password'] = providedPassword;
       }
 
-      const response = await axios.get(`${API_BASE_URL}/share/${token}`, { headers });
+      const response = await axios.get(`${API_BASE_URL}/share/${token}`, { 
+        headers,
+        params: {
+          ...(guestName ? { name: guestName } : {}),
+        }
+      });
 
       setProject(response.data.project);
       setPermissions(response.data.permissions);
@@ -371,6 +377,9 @@ export default function SharedProjectView() {
 
             {/* Right side - User info */}
             <div className="flex items-center gap-3 shrink-0">
+              {/* Project Participants */}
+              <ProjectParticipants shareToken={token} />
+              
               {guestName && (
                 <Badge variant="outline" className="gap-1.5 border-primary/30 text-primary">
                   <User className="w-3 h-3" />

@@ -1,6 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import Project from '../models/Project.js';
+import User from '../models/User.js';
 import { auth, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -168,6 +169,51 @@ router.get('/share/:token', optionalAuth, async (req, res) => {
       }
     }
     
+    // Add user to participants
+    if (req.user) {
+      // Authenticated user
+      const userId = req.user.id;
+      const isOwner = project.owner.toString() === userId;
+      const isCollaborator = project.collaborators.some(
+        collabId => collabId.toString() === userId
+      );
+      const isAlreadyParticipant = project.participants.some(
+        p => p.user && p.user.toString() === userId
+      );
+
+      // Add to participants if not owner/collaborator and not already added
+      if (!isOwner && !isCollaborator && !isAlreadyParticipant) {
+        project.participants.push({
+          user: userId,
+          accessedAt: new Date(),
+        });
+        await project.save();
+      }
+    } else {
+      // Guest user - track by email if provided in query/body
+      const guestEmail = req.query.email || req.body?.email;
+      const guestName = req.query.name || req.body?.name;
+      
+      if (guestEmail) {
+        const isAlreadyParticipant = project.participants.some(
+          p => p.email === guestEmail && !p.user
+        );
+
+        if (!isAlreadyParticipant) {
+          project.participants.push({
+            email: guestEmail,
+            name: guestName || guestEmail,
+            accessedAt: new Date(),
+          });
+          await project.save();
+        }
+      }
+    }
+
+    // Populate participants for response
+    await project.populate('participants.user', 'name email');
+    await project.populate('collaborators', 'name email');
+
     // Return project data (without sensitive info)
     res.json({
       project: {
@@ -177,8 +223,12 @@ router.get('/share/:token', optionalAuth, async (req, res) => {
         breakpoints: project.breakpoints,
         canvasState: project.canvasState,
         owner: {
+          id: project.owner._id,
           name: project.owner.name,
+          email: project.owner.email,
         },
+        collaborators: project.collaborators || [],
+        participants: project.participants || [],
         createdAt: project.createdAt,
       },
       permissions: {
@@ -187,7 +237,7 @@ router.get('/share/:token', optionalAuth, async (req, res) => {
         requireName: project.shareSettings.requireName,
       },
       isAuthenticated: !!req.user,
-      user: req.user ? { id: req.user.id, name: req.user.name } : null,
+      user: req.user ? { id: req.user.id, name: req.user.name, email: req.user.email } : null,
     });
   } catch (error) {
     console.error('Error accessing shared project:', error);

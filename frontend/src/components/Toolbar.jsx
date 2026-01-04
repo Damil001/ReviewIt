@@ -8,6 +8,7 @@ import {
   CheckCheck,
   Trash2,
   Download,
+  FileText,
   Sparkles,
 } from 'lucide-react';
 
@@ -18,6 +19,7 @@ export default function Toolbar({
   onClearAll,
   onResolveAll,
   onExport,
+  onExportPDF,
   onOpenComments,
 }) {
   return (
@@ -127,9 +129,22 @@ export default function Toolbar({
               size="sm"
               onClick={onExport}
               className="gap-2 h-8 border-border/50 hover:bg-secondary"
+              title="Export Comments as JSON"
             >
               <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Export</span>
+              <span className="hidden sm:inline">Export JSON</span>
+            </Button>
+          )}
+          {onExportPDF && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onExportPDF}
+              className="gap-2 h-8 border-border/50 hover:bg-primary hover:text-primary-foreground"
+              title="Export Reviews as PDF"
+            >
+              <FileText className="w-4 h-4" />
+              <span className="hidden sm:inline">Export PDF</span>
             </Button>
           )}
         </div>

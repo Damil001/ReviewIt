@@ -1,8 +1,72 @@
 import express from 'express';
 import Comment from '../models/Comment.js';
+import User from '../models/User.js';
+import Project from '../models/Project.js';
 import { optionalAuth } from '../middleware/auth.js';
+import { sendTagNotification } from '../services/emailService.js';
 
 const router = express.Router();
+
+// Helper function to parse @mentions from text
+const parseMentions = (text) => {
+  const mentionRegex = /@([\w.-]+@[\w.-]+\.\w+)|@(\w+)/g;
+  const mentions = [];
+  let match;
+  
+  while ((match = mentionRegex.exec(text)) !== null) {
+    // Check if it's an email (group 1) or username (group 2)
+    const email = match[1];
+    const username = match[2];
+    mentions.push({ email, username, fullMatch: match[0] });
+  }
+  
+  return mentions;
+};
+
+// Helper function to find users by email or name
+const findTaggedUsers = async (mentions, projectId = null) => {
+  const userIds = [];
+  const userMap = new Map(); // To avoid duplicates
+  
+  for (const mention of mentions) {
+    let user = null;
+    
+    // Try to find by email first
+    if (mention.email) {
+      user = await User.findOne({ email: mention.email.toLowerCase() });
+    }
+    
+    // If not found by email, try by name
+    if (!user && mention.username) {
+      user = await User.findOne({ 
+        name: { $regex: new RegExp(`^${mention.username}$`, 'i') }
+      });
+    }
+    
+    // If projectId is provided, also check if user is a collaborator or owner
+    if (user && projectId) {
+      const project = await Project.findById(projectId);
+      if (project) {
+        const isCollaborator = project.collaborators.some(
+          id => id.toString() === user._id.toString()
+        );
+        const isOwner = project.owner.toString() === user._id.toString();
+        
+        if (!isCollaborator && !isOwner) {
+          // User is not part of the project, skip
+          continue;
+        }
+      }
+    }
+    
+    if (user && !userMap.has(user._id.toString())) {
+      userIds.push(user._id);
+      userMap.set(user._id.toString(), user);
+    }
+  }
+  
+  return { userIds, userMap };
+};
 
 // Get all comments for a URL
 router.get('/', async (req, res) => {
@@ -15,6 +79,8 @@ router.get('/', async (req, res) => {
     if (projectId) query.projectId = projectId;
     
     const comments = await Comment.find(query)
+      .populate('taggedUsers', 'name email')
+      .populate('replies.taggedUsers', 'name email')
       .sort({ createdAt: -1 })
       .lean();
     
@@ -46,6 +112,10 @@ router.post('/', optionalAuth, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields: url, x, y, text' });
     }
     
+    // Parse mentions and find tagged users
+    const mentions = parseMentions(text);
+    const { userIds, userMap } = await findTaggedUsers(mentions, projectId);
+    
     const comment = new Comment({
       url,
       x: parseFloat(x),
@@ -57,10 +127,49 @@ router.post('/', optionalAuth, async (req, res) => {
       projectId: projectId || null,
       resolved: false,
       replies: [],
+      taggedUsers: userIds,
       metadata: metadata || null,
     });
     
     await comment.save();
+    await comment.populate('taggedUsers', 'name email');
+    
+    // Send email notifications to tagged users (async, don't wait)
+    if (userIds.length > 0 && projectId) {
+      const project = await Project.findById(projectId).populate('owner', 'name');
+      const projectName = project?.name || 'Untitled Project';
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const commentUrl = `${frontendUrl}/project/${projectId}?comment=${comment._id}`;
+      
+      const senderName = author || req.user?.name || 'Anonymous';
+      
+      // Send emails asynchronously
+      Promise.all(
+        Array.from(userMap.values()).map(async (user) => {
+          // Don't send email to the person who created the comment
+          if (req.user && user._id.toString() === req.user.id) {
+            return;
+          }
+          
+          try {
+            await sendTagNotification({
+              to: user.email,
+              toName: user.name,
+              fromName: senderName,
+              commentText: text,
+              projectName,
+              projectUrl: `${frontendUrl}/project/${projectId}`,
+              commentUrl,
+              isReply: false,
+            });
+          } catch (emailError) {
+            console.error(`Failed to send email to ${user.email}:`, emailError);
+          }
+        })
+      ).catch(err => {
+        console.error('Error sending tag notifications:', err);
+      });
+    }
     
     // Return in format expected by frontend
     res.status(201).json({ 
@@ -90,7 +199,7 @@ router.patch('/:id', async (req, res) => {
       id,
       updateData,
       { new: true }
-    );
+    ).populate('taggedUsers', 'name email');
     
     if (!comment) {
       return res.status(404).json({ error: 'Comment not found' });
@@ -173,24 +282,69 @@ router.post('/:id/replies', optionalAuth, async (req, res) => {
       return res.status(400).json({ error: 'Reply text required' });
     }
     
+    // Get the comment first to access projectId
+    const comment = await Comment.findById(id);
+    if (!comment) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+    
+    // Parse mentions and find tagged users
+    const mentions = parseMentions(text);
+    const { userIds, userMap } = await findTaggedUsers(mentions, comment.projectId);
+    
     const reply = {
       text,
       author: author || req.user?.name || 'Anonymous',
       image: image || null,
       timestamp: new Date(),
+      taggedUsers: userIds,
     };
     
-    const comment = await Comment.findByIdAndUpdate(
+    const updatedComment = await Comment.findByIdAndUpdate(
       id,
       { $push: { replies: reply } },
       { new: true }
-    );
+    ).populate('taggedUsers', 'name email')
+     .populate('replies.taggedUsers', 'name email');
     
-    if (!comment) {
-      return res.status(404).json({ error: 'Comment not found' });
+    const lastReply = updatedComment.replies[updatedComment.replies.length - 1];
+    
+    // Send email notifications to tagged users (async, don't wait)
+    if (userIds.length > 0 && comment.projectId) {
+      const project = await Project.findById(comment.projectId).populate('owner', 'name');
+      const projectName = project?.name || 'Untitled Project';
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const commentUrl = `${frontendUrl}/project/${comment.projectId}?comment=${id}`;
+      
+      const senderName = author || req.user?.name || 'Anonymous';
+      
+      // Send emails asynchronously
+      Promise.all(
+        Array.from(userMap.values()).map(async (user) => {
+          // Don't send email to the person who created the reply
+          if (req.user && user._id.toString() === req.user.id) {
+            return;
+          }
+          
+          try {
+            await sendTagNotification({
+              to: user.email,
+              toName: user.name,
+              fromName: senderName,
+              commentText: text,
+              projectName,
+              projectUrl: `${frontendUrl}/project/${comment.projectId}`,
+              commentUrl,
+              isReply: true,
+            });
+          } catch (emailError) {
+            console.error(`Failed to send email to ${user.email}:`, emailError);
+          }
+        })
+      ).catch(err => {
+        console.error('Error sending tag notifications:', err);
+      });
     }
-    
-    const lastReply = comment.replies[comment.replies.length - 1];
     
     res.status(201).json({ 
       reply: {
@@ -198,9 +352,9 @@ router.post('/:id/replies', optionalAuth, async (req, res) => {
         id: lastReply._id.toString(),
       },
       comment: {
-        ...comment.toObject(),
-        id: comment._id.toString(),
-        timestamp: comment.createdAt?.getTime() || Date.now(),
+        ...updatedComment.toObject(),
+        id: updatedComment._id.toString(),
+        timestamp: updatedComment.createdAt?.getTime() || Date.now(),
       }
     });
   } catch (error) {

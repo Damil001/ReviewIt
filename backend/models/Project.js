@@ -7,6 +7,11 @@ const breakpointSchema = new mongoose.Schema({
   height: Number,
   x: Number,
   y: Number,
+  browser: {
+    type: String,
+    default: 'chromium',
+    enum: ['chromium', 'firefox', 'webkit', 'edge'],
+  },
 }, { _id: false });
 
 const shareSettingsSchema = new mongoose.Schema({
@@ -59,6 +64,19 @@ const projectSchema = new mongoose.Schema({
   collaborators: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
+  }],
+  // Users who accessed via share link (for tracking and mentions)
+  participants: [{
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    accessedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    email: String, // Store email for non-authenticated users
+    name: String, // Store name for non-authenticated users
   }],
   breakpoints: [breakpointSchema],
   canvasState: {

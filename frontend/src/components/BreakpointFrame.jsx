@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ReviewOverlay from './ReviewOverlay';
+import BrowserSelector from './BrowserSelector';
 
 export default function BreakpointFrame({ 
   url, 
@@ -16,12 +17,27 @@ export default function BreakpointFrame({
   currentUser = 'Anonymous',
   projectId,
   onCommentsUpdate,
+  breakpointIndex = 0,
+  reviewToolState = null,
+  browser = 'chromium',
+  onBrowserChange = null,
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const iframeRef = useRef(null);
 
-  const proxiedUrl = `${proxyBaseUrl}/proxy?url=${encodeURIComponent(url)}`;
+  // Use LambdaTest for Safari (real Safari rendering), regular proxy for others
+  const proxiedUrl = browser === 'webkit' 
+    ? `${proxyBaseUrl}/proxy?url=${encodeURIComponent(url)}&browser=webkit&lambdatest=true&width=${width}&height=${height}`
+    : `${proxyBaseUrl}/proxy?url=${encodeURIComponent(url)}&browser=${encodeURIComponent(browser)}`;
+
+  // Reload iframe when browser changes
+  useEffect(() => {
+    if (iframeRef.current) {
+      setLoading(true);
+      iframeRef.current.src = proxiedUrl;
+    }
+  }, [browser, proxiedUrl, width, height]);
 
   const handleLoad = () => {
     setLoading(false);
@@ -45,20 +61,27 @@ export default function BreakpointFrame({
         <div style={styles.label}>
           {label} ({width} × {height})
         </div>
-        {canDelete && onDelete && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (window.confirm(`Delete ${label} breakpoint?`)) {
-                onDelete();
-              }
-            }}
-            style={styles.deleteButton}
-            title="Delete breakpoint"
-          >
-            ×
-          </button>
-        )}
+        <div style={styles.controls}>
+          <BrowserSelector
+            selectedBrowser={browser}
+            onBrowserChange={onBrowserChange}
+            disabled={loading}
+          />
+          {canDelete && onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (window.confirm(`Delete ${label} breakpoint?`)) {
+                  onDelete();
+                }
+              }}
+              style={styles.deleteButton}
+              title="Delete breakpoint"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
       <div style={{
         ...styles.frameWrapper,
@@ -101,6 +124,8 @@ export default function BreakpointFrame({
           currentUser={currentUser}
           projectId={projectId}
           onCommentsUpdate={onCommentsUpdate}
+          breakpointIndex={breakpointIndex}
+          reviewToolState={reviewToolState}
         />
       </div>
     </div>
@@ -117,10 +142,16 @@ const styles = {
   labelContainer: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     gap: '8px',
     position: 'relative',
     width: '100%',
+    padding: '0 4px',
+  },
+  controls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
   },
   label: {
     fontSize: '14px',

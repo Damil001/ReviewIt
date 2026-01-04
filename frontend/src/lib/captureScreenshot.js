@@ -73,6 +73,13 @@ export async function captureScreenshot(iframe, x, y, areaSize = { width: 500, h
     }
 
     const result = await response.json();
+    
+    // If screenshot was skipped or URL is null, create placeholder
+    if (result.skipped || !result.url) {
+      console.log('📸 Screenshot skipped, creating placeholder');
+      return await createPlaceholderScreenshot(targetUrl, iframe);
+    }
+    
     console.log('Server-side screenshot captured:', result.url);
     
     // Return full URL using helper

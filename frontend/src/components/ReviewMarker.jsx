@@ -1,7 +1,51 @@
 export default function ReviewMarker({ review, scale }) {
-  const { position, type, color, resolved } = review;
+  const { position, type, color, resolved, drawing } = review;
 
-  if (!position) return null;
+  if (!position && type !== 'drawing') return null;
+
+  // Render drawing
+  if (type === 'drawing' && drawing) {
+    try {
+      const drawingData = JSON.parse(drawing);
+      const path = drawingData.path || [];
+      
+      if (path.length === 0) return null;
+
+      // Create SVG path string
+      const pathString = path
+        .map((point, index) => {
+          if (index === 0) return `M ${point.x * scale} ${point.y * scale}`;
+          return `L ${point.x * scale} ${point.y * scale}`;
+        })
+        .join(' ');
+
+      return (
+        <svg
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            opacity: resolved ? 0.5 : 1,
+          }}
+        >
+          <path
+            d={pathString}
+            stroke={drawingData.color || color || '#ff4444'}
+            strokeWidth={(drawingData.lineWidth || 3) * scale}
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    } catch (error) {
+      console.error('Error parsing drawing:', error);
+      return null;
+    }
+  }
 
   const styles = {
     point: {

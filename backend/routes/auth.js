@@ -96,7 +96,11 @@ router.post('/register', [
     }
 
     // Create user
-    const user = new User({ name, email, password });
+    const user = new User({ 
+      name, 
+      email, 
+      password,
+    });
     await user.save();
 
     // Generate token

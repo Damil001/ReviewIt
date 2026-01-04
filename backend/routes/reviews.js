@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import Review from '../models/Review.js';
 import Project from '../models/Project.js';
+import { emitToProject } from '../services/socketService.js';
 
 const router = express.Router();
 
@@ -48,6 +49,9 @@ router.post('/', authenticate, async (req, res) => {
     await review.save();
     await review.populate('createdBy', 'name email');
 
+    // Emit real-time update
+    emitToProject(projectId, 'review-added', review);
+
     res.status(201).json({ review });
   } catch (error) {
     console.error('Create review error:', error);
@@ -89,6 +93,13 @@ router.patch('/:id/resolve', authenticate, async (req, res) => {
 
     review.resolved = !review.resolved;
     await review.save();
+    await review.populate('createdBy', 'name email');
+
+    // Emit real-time update
+    const project = await Project.findById(review.project);
+    if (project) {
+      emitToProject(project._id.toString(), 'review-updated', review);
+    }
 
     res.json({ review });
   } catch (error) {
@@ -112,7 +123,12 @@ router.delete('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
-    await Review.deleteOne({ _id: req.params.id });
+    const reviewId = req.params.id;
+    await Review.deleteOne({ _id: reviewId });
+
+    // Emit real-time update
+    emitToProject(project._id.toString(), 'review-deleted', { id: reviewId });
+
     res.json({ message: 'Review deleted' });
   } catch (error) {
     console.error('Delete review error:', error);

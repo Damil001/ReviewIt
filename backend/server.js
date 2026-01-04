@@ -10,17 +10,24 @@ import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import passport from 'passport';
+import fs from 'fs/promises';
+import fsSync from 'fs';
+import { setIO } from './services/socketService.js';
+
+// Load environment variables
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Import routes
 import authRoutes from './routes/auth.js';
 import projectRoutes from './routes/projects.js';
 import reviewRoutes from './routes/reviews.js';
 import commentRoutes from './routes/comments.js';
 import shareRoutes from './routes/share.js';
 import uploadRoutes from './routes/uploads.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config();
+import exportRoutes from './routes/export.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -40,6 +47,9 @@ const io = new Server(httpServer, {
     methods: ['GET', 'POST'],
   },
 });
+
+// Set io instance for use in routes
+setIO(io);
 
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/reviewonly';
@@ -110,6 +120,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/comments', commentRoutes);
 app.use('/api/uploads', uploadRoutes);
+app.use('/api/export', exportRoutes);
 app.use('/api', shareRoutes); // Share routes: /api/projects/:id/share and /api/share/:token
 
 // Helper function to rewrite URLs
@@ -182,24 +193,47 @@ function rewriteCssUrls(css, baseUrl) {
   return rewritten;
 }
 
+// Browser User-Agent strings
+function getUserAgent(browser = 'chromium') {
+  const userAgents = {
+    chromium: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    firefox: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    webkit: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    edge: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+  };
+  return userAgents[browser.toLowerCase()] || userAgents.chromium;
+}
+
+function getAcceptHeader(browser = 'chromium') {
+  const acceptHeaders = {
+    chromium: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    firefox: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    webkit: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    edge: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  };
+  return acceptHeaders[browser.toLowerCase()] || acceptHeaders.chromium;
+}
+
 // Proxy endpoint
 app.get('/proxy', async (req, res) => {
   const targetUrl = req.query.url;
+  const browser = req.query.browser || 'chromium';
   
   if (!targetUrl) {
     return res.status(400).json({ error: 'Missing url parameter' });
   }
   
   try {
-    console.log('Proxying URL:', targetUrl);
+    console.log(`Proxying URL (${browser}):`, targetUrl);
     
-    // Fetch the target URL
+    // Fetch the target URL with browser-specific headers
     const response = await axios.get(targetUrl, {
       responseType: 'arraybuffer',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'User-Agent': getUserAgent(browser),
+        'Accept': getAcceptHeader(browser),
         'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
       },
       maxRedirects: 5,
       validateStatus: (status) => status < 500,
@@ -403,7 +437,7 @@ app.get('/proxy', async (req, res) => {
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
   
-  // User joins a review session
+  // User joins a review session (by URL - legacy support)
   socket.on('join-session', (data) => {
     const { url } = data;
     socket.join(url);
@@ -411,42 +445,115 @@ io.on('connection', (socket) => {
     console.log(`User ${socket.id} joined session: ${url}`);
   });
   
+  // User joins a project (new - project-based)
+  socket.on('join-project', (data) => {
+    const { projectId } = data;
+    socket.join(`project:${projectId}`);
+    socket.to(`project:${projectId}`).emit('user-joined', { 
+      socketId: socket.id,
+      userId: socket.auth?.userId,
+      userName: socket.auth?.userName,
+    });
+    console.log(`User ${socket.id} joined project: ${projectId}`);
+  });
+  
+  // User leaves a project
+  socket.on('leave-project', (data) => {
+    const { projectId } = data;
+    socket.leave(`project:${projectId}`);
+    socket.to(`project:${projectId}`).emit('user-left', { socketId: socket.id });
+  });
+  
   // New comment added
   socket.on('add-comment', (data) => {
-    io.to(data.url).emit('comment-added', data.comment);
+    if (data.projectId) {
+      io.to(`project:${data.projectId}`).emit('comment-added', data.comment);
+    } else if (data.url) {
+      io.to(data.url).emit('comment-added', data.comment);
+    }
   });
   
   // Comment updated
   socket.on('update-comment', (data) => {
-    io.to(data.url).emit('comment-updated', data.comment);
+    if (data.projectId) {
+      io.to(`project:${data.projectId}`).emit('comment-updated', data.comment);
+    } else if (data.url) {
+      io.to(data.url).emit('comment-updated', data.comment);
+    }
   });
   
   // Comment deleted
   socket.on('delete-comment', (data) => {
-    io.to(data.url).emit('comment-deleted', { id: data.commentId });
+    if (data.projectId) {
+      io.to(`project:${data.projectId}`).emit('comment-deleted', { id: data.commentId });
+    } else if (data.url) {
+      io.to(data.url).emit('comment-deleted', { id: data.commentId });
+    }
+  });
+  
+  // New review added
+  socket.on('review-added', (data) => {
+    if (data.projectId) {
+      io.to(`project:${data.projectId}`).emit('review-added', data.review);
+    }
+  });
+  
+  // Review updated
+  socket.on('review-updated', (data) => {
+    if (data.projectId) {
+      io.to(`project:${data.projectId}`).emit('review-updated', data.review);
+    }
+  });
+  
+  // Review deleted
+  socket.on('review-deleted', (data) => {
+    if (data.projectId) {
+      io.to(`project:${data.projectId}`).emit('review-deleted', { id: data.reviewId });
+    }
   });
   
   // Cursor position
   socket.on('cursor-move', (data) => {
-    socket.to(data.url).emit('cursor-update', {
-      socketId: socket.id,
-      x: data.x,
-      y: data.y,
-      author: data.author,
-    });
+    if (data.projectId) {
+      socket.to(`project:${data.projectId}`).emit('cursor-update', {
+        socketId: socket.id,
+        x: data.x,
+        y: data.y,
+        author: data.author,
+      });
+    } else if (data.url) {
+      socket.to(data.url).emit('cursor-update', {
+        socketId: socket.id,
+        x: data.x,
+        y: data.y,
+        author: data.author,
+      });
+    }
   });
   
   // Drawing events
   socket.on('drawing-start', (data) => {
-    socket.to(data.url).emit('drawing-start', data);
+    if (data.projectId) {
+      socket.to(`project:${data.projectId}`).emit('drawing-start', data);
+    } else if (data.url) {
+      socket.to(data.url).emit('drawing-start', data);
+    }
   });
   
   socket.on('drawing-update', (data) => {
-    socket.to(data.url).emit('drawing-update', data);
+    if (data.projectId) {
+      socket.to(`project:${data.projectId}`).emit('drawing-update', data);
+    } else if (data.url) {
+      socket.to(data.url).emit('drawing-update', data);
+    }
   });
   
   socket.on('drawing-end', (data) => {
-    socket.to(data.url).emit('drawing-end', data);
+    if (data.projectId) {
+      socket.to(`project:${data.projectId}`).emit('drawing-end', data);
+    } else if (data.url) {
+      socket.to(data.url).emit('drawing-end', data);
+    }
   });
   
   socket.on('disconnect', () => {

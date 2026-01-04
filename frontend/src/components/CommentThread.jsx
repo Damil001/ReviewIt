@@ -22,6 +22,34 @@ import { API_BASE_URL, getFullFileUrl } from "../config.js";
 // Alias for backwards compatibility
 const getFullImageUrl = getFullFileUrl;
 
+// Helper function to highlight mentions in text
+const highlightMentions = (text) => {
+  if (!text) return text;
+  const mentionRegex = /@([\w.-]+@[\w.-]+\.\w+)|@(\w+)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = mentionRegex.exec(text)) !== null) {
+    // Add text before the mention
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+    // Add highlighted mention
+    parts.push(
+      <span key={match.index} className="text-primary font-medium">
+        {match[0]}
+      </span>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+  return parts.length > 0 ? parts : text;
+};
+
 export default function CommentThread({
   comment,
   onClose,
@@ -29,6 +57,7 @@ export default function CommentThread({
   onResolve,
   onDelete,
   currentUser = "",
+  projectId,
 }) {
   const [replyText, setReplyText] = useState("");
   const [author, setAuthor] = useState(currentUser);
@@ -36,12 +65,70 @@ export default function CommentThread({
   const [imagePreview, setImagePreview] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showFullImage, setShowFullImage] = useState(null);
+  const [collaborators, setCollaborators] = useState([]);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
+  const [mentionPosition, setMentionPosition] = useState({ top: 0, left: 0 });
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   const threadEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
+  const mentionSuggestionsRef = useRef(null);
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [comment?.replies]);
+
+  // Fetch project participants for mentions
+  useEffect(() => {
+    if (!projectId) return;
+
+    const fetchParticipants = async () => {
+      try {
+        // Try to get participants endpoint first (for authenticated users)
+        try {
+          const response = await axios.get(`${API_BASE_URL}/projects/${projectId}/participants`);
+          const participants = response.data.participants || [];
+          setCollaborators(participants);
+          return;
+        } catch (err) {
+          // If that fails, try regular project endpoint
+          console.log("Participants endpoint not available, trying project endpoint");
+        }
+
+        // Fallback to project endpoint
+        const response = await axios.get(`${API_BASE_URL}/projects/${projectId}`);
+        const project = response.data.project;
+        const allUsers = [
+          project.owner,
+          ...(project.collaborators || []),
+          ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
+        ].filter(Boolean);
+        setCollaborators(allUsers);
+      } catch (error) {
+        console.error("Error fetching participants:", error);
+        // If both fail, try share endpoint (for shared projects)
+        try {
+          // Extract share token from URL if available
+          const shareToken = window.location.pathname.split('/share/')[1];
+          if (shareToken) {
+            const response = await axios.get(`${API_BASE_URL}/share/${shareToken}`);
+            const project = response.data.project;
+            const allUsers = [
+              project.owner,
+              ...(project.collaborators || []),
+              ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
+            ].filter(Boolean);
+            setCollaborators(allUsers);
+          }
+        } catch (shareError) {
+          console.error("Error fetching from share endpoint:", shareError);
+        }
+      }
+    };
+
+    fetchParticipants();
+  }, [projectId]);
 
   // Handle image file selection
   const handleImageSelect = async (e) => {
@@ -97,6 +184,106 @@ export default function CommentThread({
     }
   };
 
+  // Handle mention detection in textarea
+  const handleTextChange = (e) => {
+    const text = e.target.value;
+    setReplyText(text);
+
+    // Get cursor position
+    const cursorPos = e.target.selectionStart;
+    const textBeforeCursor = text.substring(0, cursorPos);
+    
+    // Check if we're typing a mention (supports @username or @email)
+    const mentionMatch = textBeforeCursor.match(/@([\w.-]*@?[\w.-]*)$/);
+    
+    if (mentionMatch && collaborators.length > 0) {
+      const query = mentionMatch[1].toLowerCase();
+      setMentionQuery(query);
+      
+      // Get textarea position for suggestions dropdown
+      const textarea = e.target;
+      const rect = textarea.getBoundingClientRect();
+      
+      // Simple positioning - show below textarea
+      const atPosition = {
+        top: rect.bottom + window.scrollY + 5,
+        left: rect.left + window.scrollX + 10,
+      };
+      
+      setMentionPosition(atPosition);
+      setShowMentionSuggestions(true);
+      setSelectedMentionIndex(0);
+    } else {
+      setShowMentionSuggestions(false);
+    }
+  };
+
+  // Filter collaborators based on mention query
+  const filteredCollaborators = collaborators.filter((user) => {
+    if (!mentionQuery) return true;
+    const name = (user.name || "").toLowerCase();
+    const email = (user.email || "").toLowerCase();
+    return name.includes(mentionQuery) || email.includes(mentionQuery);
+  });
+
+  // Insert mention into text
+  const insertMention = (user) => {
+    const text = replyText;
+    const cursorPos = textareaRef.current?.selectionStart || text.length;
+    const textBeforeCursor = text.substring(0, cursorPos);
+    const textAfterCursor = text.substring(cursorPos);
+    
+    // Find the @ mention to replace
+    const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+    if (mentionMatch) {
+      const startPos = mentionMatch.index;
+      const newText = 
+        text.substring(0, startPos) + 
+        `@${user.email || user.name}` + 
+        " " + 
+        textAfterCursor;
+      
+      setReplyText(newText);
+      setShowMentionSuggestions(false);
+      
+      // Set cursor position after the mention
+      setTimeout(() => {
+        if (textareaRef.current) {
+          const newCursorPos = startPos + `@${user.email || user.name} `.length;
+          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+          textareaRef.current.focus();
+        }
+      }, 0);
+    }
+  };
+
+  // Handle keyboard navigation in mention suggestions
+  const handleKeyDown = (e) => {
+    if (!showMentionSuggestions) {
+      if (e.key === "Enter" && e.ctrlKey && !isSending) {
+        handleReply();
+      }
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedMentionIndex((prev) =>
+        Math.min(prev + 1, filteredCollaborators.length - 1)
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedMentionIndex((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      if (filteredCollaborators[selectedMentionIndex]) {
+        insertMention(filteredCollaborators[selectedMentionIndex]);
+      }
+    } else if (e.key === "Escape") {
+      setShowMentionSuggestions(false);
+    }
+  };
+
   const handleReply = async () => {
     if ((replyText.trim() || imagePreview) && !isSending) {
       setIsSending(true);
@@ -108,6 +295,7 @@ export default function CommentThread({
         );
         setReplyText("");
         setImagePreview(null);
+        setShowMentionSuggestions(false);
       } catch (error) {
         console.error("Failed to send reply:", error);
       } finally {
@@ -200,7 +388,7 @@ export default function CommentThread({
                   )}
                 </div>
                 <p className="mt-2 text-sm text-foreground/90 leading-relaxed">
-                  {comment.text}
+                  {highlightMentions(comment.text)}
                 </p>
               </div>
             </div>
@@ -224,7 +412,7 @@ export default function CommentThread({
                       </span>
                     </div>
                     <p className="mt-1 text-sm text-foreground/80 leading-relaxed">
-                      {reply.text}
+                      {highlightMentions(reply.text)}
                     </p>
                     {/* Reply Image */}
                     {reply.image && (
@@ -282,19 +470,62 @@ export default function CommentThread({
             onChange={(e) => setAuthor(e.target.value)}
             className="bg-background/50 border-border/50 h-9 text-sm"
           />
-          <div className="flex gap-2">
+          <div className="flex gap-2 relative">
             <Textarea
+              ref={textareaRef}
               value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              placeholder="Write a reply..."
+              onChange={handleTextChange}
+              placeholder="Write a reply... Use @ to mention someone"
               className="bg-background/50 border-border/50 min-h-[80px] resize-none text-sm"
               disabled={isSending}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && e.ctrlKey && !isSending) {
-                  handleReply();
-                }
+              onKeyDown={handleKeyDown}
+              onBlur={(e) => {
+                // Delay hiding suggestions to allow clicking on them
+                setTimeout(() => {
+                  if (!mentionSuggestionsRef.current?.contains(document.activeElement)) {
+                    setShowMentionSuggestions(false);
+                  }
+                }, 200);
               }}
             />
+            
+            {/* Mention Suggestions Dropdown */}
+            {showMentionSuggestions && filteredCollaborators.length > 0 && (
+              <div
+                ref={mentionSuggestionsRef}
+                className="fixed z-50 bg-background border border-border/50 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+                style={{
+                  top: `${mentionPosition.top}px`,
+                  left: `${mentionPosition.left}px`,
+                  minWidth: '200px',
+                }}
+              >
+                {filteredCollaborators.map((user, index) => (
+                  <div
+                    key={user._id || user.id || index}
+                    className={`px-3 py-2 cursor-pointer flex items-center gap-2 ${
+                      index === selectedMentionIndex
+                        ? "bg-primary/20 text-primary"
+                        : "hover:bg-accent"
+                    }`}
+                    onClick={() => insertMention(user)}
+                    onMouseEnter={() => setSelectedMentionIndex(index)}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-xs font-semibold text-white shrink-0">
+                      {user.name?.charAt(0).toUpperCase() || "U"}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">
+                        {user.name || "Unknown"}
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {user.email}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">

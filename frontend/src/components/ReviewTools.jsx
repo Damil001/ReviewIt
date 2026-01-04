@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { API_BASE_URL } from '../config.js';
+import { useSocket } from '../context/SocketContext';
 
 export default function ReviewTools({ projectId, breakpointIndex, onReviewAdd, onToolChange }) {
+  const { socket } = useSocket();
   const [tool, setTool] = useState('point'); // point, area, drawing
   const [color, setColor] = useState('#ff4444');
   const [isDrawing, setIsDrawing] = useState(false);
@@ -18,7 +20,7 @@ export default function ReviewTools({ projectId, breakpointIndex, onReviewAdd, o
 
   const handleCreateReview = async (type, position, drawing = null) => {
     try {
-      await axios.post(`${API_BASE_URL}/reviews`, {
+      const response = await axios.post(`${API_BASE_URL}/reviews`, {
         projectId,
         breakpointIndex,
         type,
@@ -26,6 +28,15 @@ export default function ReviewTools({ projectId, breakpointIndex, onReviewAdd, o
         drawing,
         color,
       });
+      
+      // Emit socket event for real-time sync
+      if (socket) {
+        socket.emit('review-added', {
+          projectId,
+          review: response.data.review,
+        });
+      }
+      
       onReviewAdd();
     } catch (error) {
       console.error('Error creating review:', error);

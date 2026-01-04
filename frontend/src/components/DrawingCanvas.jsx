@@ -84,6 +84,8 @@ export default function DrawingCanvas({
         color,
         lineWidth,
       });
+      // Clear canvas after saving
+      clearCanvas();
     }
     
     setCurrentPath([]);
