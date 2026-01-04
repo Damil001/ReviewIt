@@ -81,30 +81,36 @@ export default function CommentThread({
 
   // Fetch project participants for mentions
   useEffect(() => {
+    console.log('📋 CommentThread mounted/updated:', { projectId, commentId: comment?.id });
+    
     if (!projectId) {
       // Try to get from share token if no projectId
       const shareToken = window.location.pathname.split('/share/')[1];
       if (shareToken) {
+        console.log('🔗 No projectId, trying share token:', shareToken);
         fetchParticipantsFromShare(shareToken);
+      } else {
+        console.warn('⚠️ No projectId and no share token found');
       }
       return;
     }
 
     fetchParticipants();
-  }, [projectId]);
+  }, [projectId, comment?.id]);
 
   const fetchParticipants = async () => {
+    console.log('🔄 Fetching participants for projectId:', projectId);
     try {
       // Try to get participants endpoint first (for authenticated users)
       try {
         const response = await axios.get(`${API_BASE_URL}/projects/${projectId}/participants`);
         const participants = response.data.participants || [];
-        console.log('Fetched participants:', participants);
+        console.log('✅ Fetched participants from /participants endpoint:', participants.length, participants);
         setCollaborators(participants);
         return;
       } catch (err) {
         // If that fails, try regular project endpoint
-        console.log("Participants endpoint not available, trying project endpoint", err);
+        console.log("⚠️ Participants endpoint failed, trying project endpoint", err.response?.status, err.message);
       }
 
       // Fallback to project endpoint
@@ -115,19 +121,21 @@ export default function CommentThread({
         ...(project.collaborators || []),
         ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
       ].filter(Boolean);
-      console.log('Fetched users from project endpoint:', allUsers);
+      console.log('✅ Fetched users from project endpoint:', allUsers.length, allUsers);
       setCollaborators(allUsers);
     } catch (error) {
-      console.error("Error fetching participants:", error);
+      console.error("❌ Error fetching participants:", error.response?.status, error.message);
       // If both fail, try share endpoint (for shared projects)
       const shareToken = window.location.pathname.split('/share/')[1];
       if (shareToken) {
+        console.log('🔄 Trying share endpoint as fallback');
         fetchParticipantsFromShare(shareToken);
       }
     }
   };
 
   const fetchParticipantsFromShare = async (shareToken) => {
+    console.log('🔄 Fetching participants from share token:', shareToken);
     try {
       const response = await axios.get(`${API_BASE_URL}/share/${shareToken}`);
       const project = response.data.project;
@@ -136,10 +144,10 @@ export default function CommentThread({
         ...(project.collaborators || []),
         ...(project.participants || []).map(p => p.user || { name: p.name, email: p.email }),
       ].filter(Boolean);
-      console.log('Fetched users from share endpoint:', allUsers);
+      console.log('✅ Fetched users from share endpoint:', allUsers.length, allUsers);
       setCollaborators(allUsers);
     } catch (shareError) {
-      console.error("Error fetching from share endpoint:", shareError);
+      console.error("❌ Error fetching from share endpoint:", shareError.response?.status, shareError.message);
     }
   };
 
@@ -197,59 +205,6 @@ export default function CommentThread({
     }
   };
 
-  // Handle mention detection in textarea
-  const handleTextChange = (e) => {
-    const text = e.target.value;
-    setReplyText(text);
-
-    // Get cursor position
-    const cursorPos = e.target.selectionStart;
-    const textBeforeCursor = text.substring(0, cursorPos);
-    
-    // Check if we're typing a mention (supports @username or @email, including just @)
-    // Match @ followed by optional characters (word chars, dots, dashes, or @ for email)
-    // Also check for @ at the end of text (no space after)
-    const mentionMatch = textBeforeCursor.match(/@([\w.-@]*)$/);
-    
-    console.log('Text change:', { text, cursorPos, textBeforeCursor, mentionMatch, collaboratorsCount: collaborators.length });
-    
-    if (mentionMatch) {
-      const query = (mentionMatch[1] || '').toLowerCase();
-      setMentionQuery(query);
-      
-      if (collaborators.length > 0) {
-        // Get textarea position for suggestions dropdown
-        const textarea = e.target;
-        const rect = textarea.getBoundingClientRect();
-        
-        // Simple positioning - show below textarea
-        const atPosition = {
-          top: rect.bottom + window.scrollY + 5,
-          left: rect.left + window.scrollX + 10,
-        };
-        
-        setMentionPosition(atPosition);
-        setShowMentionSuggestions(true);
-        setSelectedMentionIndex(0);
-        console.log('Showing mention suggestions with', filteredCollaborators.length, 'users');
-      } else {
-        // If @ is typed but collaborators haven't loaded yet
-        console.log('@ typed but collaborators not loaded yet. Current count:', collaborators.length);
-        // Still show the dropdown but it will be empty - this helps debug
-        const textarea = e.target;
-        const rect = textarea.getBoundingClientRect();
-        const atPosition = {
-          top: rect.bottom + window.scrollY + 5,
-          left: rect.left + window.scrollX + 10,
-        };
-        setMentionPosition(atPosition);
-        setShowMentionSuggestions(true);
-      }
-    } else {
-      setShowMentionSuggestions(false);
-    }
-  };
-
   // Filter collaborators based on mention query
   const filteredCollaborators = collaborators.filter((user) => {
     if (!mentionQuery) return true;
@@ -258,6 +213,73 @@ export default function CommentThread({
     const matches = name.includes(mentionQuery) || email.includes(mentionQuery);
     return matches;
   });
+
+  // Handle mention detection in textarea
+  const handleTextChange = (e) => {
+    const text = e.target.value;
+    setReplyText(text);
+
+    // Get cursor position
+    const cursorPos = e.target.selectionStart || text.length;
+    const textBeforeCursor = text.substring(0, cursorPos);
+    
+    // Check if we're typing a mention (supports @username or @email, including just @)
+    // Match @ followed by optional characters (word chars, dots, dashes, or @ for email)
+    const mentionMatch = textBeforeCursor.match(/@([\w.-@]*)$/);
+    
+    // Always log when @ is present to help debug
+    if (text.includes('@')) {
+      console.log('🔍 Mention detection:', { 
+        text, 
+        cursorPos, 
+        textBeforeCursor, 
+        hasMatch: !!mentionMatch,
+        matchText: mentionMatch?.[0],
+        collaboratorsCount: collaborators.length,
+        projectId 
+      });
+    }
+    
+    if (mentionMatch) {
+      const query = (mentionMatch[1] || '').toLowerCase();
+      setMentionQuery(query);
+      
+      // Get textarea position for suggestions dropdown
+      const textarea = e.target;
+      const rect = textarea.getBoundingClientRect();
+      
+      // Simple positioning - show below textarea
+      const atPosition = {
+        top: rect.bottom + window.scrollY + 5,
+        left: rect.left + window.scrollX + 10,
+      };
+      
+      setMentionPosition(atPosition);
+      setShowMentionSuggestions(true);
+      setSelectedMentionIndex(0);
+      
+      // Calculate filtered count after setting query
+      const filtered = collaborators.filter((user) => {
+        if (!query) return true;
+        const name = (user.name || "").toLowerCase();
+        const email = (user.email || "").toLowerCase();
+        return name.includes(query) || email.includes(query);
+      });
+      
+      console.log('✅ Showing mention dropdown:', {
+        position: atPosition,
+        collaboratorsCount: collaborators.length,
+        filteredCount: filtered.length,
+        query,
+        collaborators: collaborators.map(u => ({ name: u.name, email: u.email }))
+      });
+    } else {
+      if (showMentionSuggestions) {
+        setShowMentionSuggestions(false);
+        console.log('❌ Hiding mention dropdown - no match');
+      }
+    }
+  };
   
   // Debug log
   useEffect(() => {
